@@ -425,14 +425,46 @@ class Skill:
 skill = Skill()
 skill.think()
 """
-GOOD = T.SYSTEM.split("CMD: write_file stock.py\n```python\n")[1].split("\n```")[0]
+# W8: the 'class Stock' STYLE example was removed from SYSTEM (win-W6-omni2: 5/10 runs pasted its load()/state["items"]
+# into a bug fix). It is kept here as a sample of clean code for check_python.
+GOOD = """class Stock:
+    def __init__(self):
+        self.state = {"items": {}, "log": []}
+
+    def load(self):
+        self.state["items"] = {"bolts": 40, "nuts": 5, "screws": 12}
+        print("load: items =", self.state["items"])
+
+    def rank(self):
+        ranked = sorted(self.state["items"].items(), key=lambda kv: kv[1])
+        print("rank: lowest first =", ranked)
+        return ranked
+
+    def pick(self, ranked):
+        name, qty = ranked[0]
+        print("pick: reorder", name, "(only", qty, "left)")
+        return name
+
+    def run(self):
+        for _ in range(2):
+            self.load()
+            choice = self.pick(self.rank())
+            self.state["log"].append(choice)
+
+
+if __name__ == "__main__":
+    Stock().run()"""
+check("class Stock" not in T.SYSTEM and "bolts" not in T.SYSTEM and "STYLE wanted" not in T.SYSTEM, "prompt",
+      "W8: the Stock STYLE example is not in the system prompt (it leaked into bug fixes)")
+check("CODE RULES" in T.SYSTEM and "Example write_file" in T.SYSTEM and "Example patch_file" in T.SYSTEM
+      and "Example replace_def" in T.SYSTEM, "prompt", "W8: the CODE RULES and the three command examples are still there")
 p1, p2, p3 = T.check_python(V1), T.check_python(V2), T.check_python(V3)
 check(any("no real logic" in x for x in p1) and any("placeholder comment" in x for x in p1),
       "check", "stub body and placeholder comment found (your first run)", str(p1))
 check(any("replaces the method" in x for x in p2), "check", "attribute shadowing a method found (your second run)", str(p2))
 check(any("takes 1" in x and "0 argument" in x for x in p3), "check", "wrong argument count found", str(p3))
 check(any("runs when the file is imported" in x for x in p3), "check", "demo code outside __main__ guard found")
-check(T.check_python(GOOD) == [], "check", "the worked example in SYSTEM passes its own check", str(T.check_python(GOOD)))
+check(T.check_python(GOOD) == [], "check", "the clean sample (the old SYSTEM Stock example) passes the check", str(T.check_python(GOOD)))
 check(T.check_python('print("a\\nb")\n') == [], "check", "plain one-line script is not flagged")
 se = T.check_python("def f(:\n    pass\n")
 check(len(se) == 1 and se[0].startswith("SYNTAX ERROR line 1"), "check", "syntax error reported with line", str(se))

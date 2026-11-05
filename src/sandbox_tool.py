@@ -56,7 +56,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-__version__ = "0.1.0+win.7"
+__version__ = "0.1.0+win.8"
 
 
 def _default_sandbox() -> Path:
@@ -1650,39 +1650,6 @@ CODE RULES (when asked to write Python):
   scoring rule or print messages, implement exactly those.
 - Never give an attribute the same name as a method (self.score = ... next to def score).
 - Put demo code under: if __name__ == "__main__":
-
-Example of the STYLE wanted (real logic, state, computed score, printed steps).
-Write code for the user's actual task, not this one:
-CMD: write_file stock.py
-```python
-class Stock:
-    def __init__(self):
-        self.state = {"items": {}, "log": []}
-
-    def load(self):
-        self.state["items"] = {"bolts": 40, "nuts": 5, "screws": 12}
-        print("load: items =", self.state["items"])
-
-    def rank(self):
-        ranked = sorted(self.state["items"].items(), key=lambda kv: kv[1])
-        print("rank: lowest first =", ranked)
-        return ranked
-
-    def pick(self, ranked):
-        name, qty = ranked[0]
-        print("pick: reorder", name, "(only", qty, "left)")
-        return name
-
-    def run(self):
-        for _ in range(2):
-            self.load()
-            choice = self.pick(self.rank())
-            self.state["log"].append(choice)
-
-
-if __name__ == "__main__":
-    Stock().run()
-```
 
 Example write_file:
 CMD: write_file hello.py

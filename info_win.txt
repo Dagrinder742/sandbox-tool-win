@@ -204,4 +204,35 @@ NEXT (Casey, PowerShell): (1) Expand-Archive the W4 zip into a NEW folder for gi
  git push -u origin main. GitHub Actions then runs Linux 3.10-3.13, macOS and Windows (macOS/Windows allowed to fail).
  (3) Then the next measured change: the field-level diff in the expected-output refusal (group B), on the same prompt.
 
+W5 (2026-11-05) FROM CLAUDE: FIRST GITHUB ACTIONS RUN (W4 pushed): linux 3.13 PASS; linux 3.10/3.11/3.12, macos, windows
+FAIL. CAUSES FOUND AND FIXED FOR LINUX AND WINDOWS; macOS NOT YET DIAGNOSED.
+Casey pushed W4 to https://github.com/Dagrinder742/sandbox-tool-win (commit 0f8aaf7). Claude could not read the CI logs
+from its session (GitHub API access was not granted); the Windows diagnosis came from Copilot's summary of the job log,
+and the Linux one from re-running the suites here on Python 3.10, 3.11 and 3.12.
+LINUX 3.10-3.12 (a real bug in W4): the bench's new verifier job path sent "go", closed the verifier's stdin by hand and
+ then called communicate(); before Python 3.13 communicate() flushes stdin even when it is closed -> ValueError ("I/O
+ operation on closed file"). 3.13 tolerates it (so it passed on CI and on Casey's 3.14). Reproduced on 3.11 and 3.12
+ here (the fake-job bench test). Fixed: communicate(input="go\n") sends it and closes stdin itself; the job assignment
+ still happens before, so nothing runs early. The tool's own run_python job path writes, closes and then polls (no
+ communicate), so it was not affected (its suite passed on 3.10-3.12).
+WINDOWS RUNNER (test assumptions; GitHub's Windows machine uses code page cp1252, Casey's PC uses UTF-8 cp65001, which is
+ why the suite passed there):
+ - the test runner crashed printing a "✓" in a result line (UnicodeEncodeError on the cp1252 console): reproduced here
+   with PYTHONIOENCODING=cp1252. Fixed: both test files set their stdout/stderr to errors="backslashreplace" at start.
+   The crash also hid every result after it, so the next CI run may show more.
+ - "with LC_ALL=C write/patch of non-ASCII text still works" (locale-encoding: cp1252): the child prints UTF-8 but the
+   test decoded it with the machine's code page. Fixed: that subprocess.run decodes with encoding="utf-8".
+ - "audit log defaults to <sandbox>.refused.log next to the sandbox": the runner's temp folder appears under a short
+   8.3 name (RUNNER~1) while the tool reports the long name of the same folder. Fixed: both sides compared after
+   os.path.realpath + normcase.
+MACOS: not diagnosed (no log). Known suspects from the Linux line: BSD sed has no --sandbox; /proc does not exist (the
+ memory watchdog is a "warn"); macOS was always "allowed to fail" in the workflow.
+TESTS: python 3.10 / 3.11 / 3.12 / 3.13 here: main suite ALL OK and bench kit ALL OK on all four; with a cp1252 console
+ (PYTHONIOENCODING=cp1252) both ALL OK. Tool code: only the version (0.1.0+win.5); tool_sha 9c6d33797c.
+UNVERIFIED: the two Windows-runner fixes that depend on Windows itself (the code page decoding and the 8.3 path), and
+ whatever the crash was hiding; macOS.
+NEXT (Casey): unzip W5 over the git folder (Expand-Archive -Force), git status / git diff --stat (expect bench\bench.py,
+ bench\test_bench.py, tests\test_sandbox_tool.py, src\sandbox_tool.py, info_win.txt), commit "W5: CI fixes", push, and
+ paste (or have Copilot summarize) the FAIL lines of any job that is still red, especially macos and windows.
+
 # The current source is src/sandbox_tool.py in this repo's zip (not copied here, to keep this file short).

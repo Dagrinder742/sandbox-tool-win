@@ -2,6 +2,13 @@
 """Checks for bench.py itself, using a fake model server (no real model needed).
 Run:  python test_bench.py      -> must end with ALL OK
 It copies the kit to a temp folder first, so your real runs/ and reports/ are never touched."""
+import sys as _s
+for _st in (_s.stdout, _s.stderr):   # never crash on a cp1252 console (GitHub's Windows runner)
+    try:
+        _st.reconfigure(errors="backslashreplace")
+    except (AttributeError, ValueError):
+        pass
+
 import http.server
 import json
 import os

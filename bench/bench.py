@@ -182,10 +182,8 @@ def _run_verifier(task: Task, local: Path, d: str, tool):
             p.kill()
             p.wait()
             raise
-        p.stdin.write("go\n")
-        p.stdin.close()
-        try:
-            out, _ = p.communicate(timeout=VERIFY_TIMEOUT)
+        try:   # sends "go" and closes stdin itself (closing it by hand breaks communicate() before Python 3.13)
+            out, _ = p.communicate(input="go\n", timeout=VERIFY_TIMEOUT)
         except subprocess.TimeoutExpired:
             job.terminate(124)
             p.wait()

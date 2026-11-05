@@ -3,6 +3,13 @@
 Tests for sandbox_tool.py. Runs entirely in a throwaway temp folder.
 Usage:  python tests/test_sandbox_tool.py      (exit code 1 on any failure; the last line is ALL OK when everything passes)
 """
+import sys as _s
+for _st in (_s.stdout, _s.stderr):   # a cp1252 console (GitHub's Windows runner) cannot print every result: never crash on it
+    try:
+        _st.reconfigure(errors="backslashreplace")
+    except (AttributeError, ValueError):
+        pass
+
 import os
 import shutil
 import subprocess
@@ -1161,7 +1168,9 @@ _probe = ("import sandbox_tool as T, json; print(json.dumps([str(T.AUDIT_LOG), T
 r = subprocess.run([sys.executable, "-c", _probe], capture_output=True, text=True, cwd=_cwd,
                    env={**_clean, "PYTHONPATH": str(SRC.parent), "SANDBOX_DIR": str(_home / "proj")})
 _a, _p, _sbx = __import__("json").loads(r.stdout)
-check(_a == str(_home / "proj.refused.log"), "package", "audit log defaults to <sandbox>.refused.log next to the sandbox", _a)
+# compared after resolving both: GitHub's runner uses short 8.3 names (RUNNER~1) for the same folder
+check(os.path.normcase(os.path.realpath(_a)) == os.path.normcase(os.path.realpath(_home / "proj.refused.log")), "package",
+      "audit log defaults to <sandbox>.refused.log next to the sandbox", _a)
 _allowed = {"/usr/local/bin", "/usr/bin", "/bin", os.path.dirname(os.path.realpath(sys.executable))}
 if os.name == "nt":   # Git for Windows' tools live in <ProgramFiles>\\Git\\usr\\bin on purpose
     _allowed |= {d for d in T._safe_path().split(os.pathsep) if d.lower().endswith(os.path.join("git", "usr", "bin"))}
@@ -1286,7 +1295,7 @@ _prog = ("import sandbox_tool as T\n"
          "T.run('patch_file loc.py', '<<<<<<< SEARCH\\nx = \"caf\\u00e9 \\u2713\"\\n=======\\nx = \"caf\\u00e9!\"\\n>>>>>>> REPLACE')\n"
          "print(open(str(T.SANDBOX / 'loc.py'), 'rb').read().decode('utf-8').strip())\n"
          "print('locale-encoding:', __import__('locale').getpreferredencoding(False))\n")
-r = subprocess.run([sys.executable, "-c", _prog], capture_output=True, text=True, cwd=_cwd, env={**_loc, "PYTHONPATH": str(SRC.parent), "PYTHONIOENCODING": "utf-8"})
+r = subprocess.run([sys.executable, "-c", _prog], capture_output=True, text=True, encoding="utf-8", cwd=_cwd, env={**_loc, "PYTHONPATH": str(SRC.parent), "PYTHONIOENCODING": "utf-8"})   # the child prints UTF-8; never decode it with the machine locale (cp1252 on CI)
 _ascii_loc = "ascii" in r.stdout.lower().replace("ansi_x3.4-1968", "ascii")
 check(r.returncode == 0 and 'x = "caf\u00e9!"' in r.stdout, "portable",
       "with LC_ALL=C (no UTF-8 mode) write/patch of non-ASCII text still works", (r.stdout + r.stderr)[-200:])

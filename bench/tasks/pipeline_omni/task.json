@@ -1,0 +1,1 @@
+{"title": "multi-file pipeline: 3 bugs across ingest.py and calc.py, main.py untouched", "output": "main.py", "outputs": ["calc.py", "ingest.py"], "difficulty": 5, "max_steps": 14}

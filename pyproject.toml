@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sandbox-tool"
+dynamic = ["version"]
+description = "Run an LLM agent inside one restricted folder: command allowlist, guarded file edits and a monitored Python runner."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["llm", "agent", "sandbox", "llama.cpp", "local-models", "tool-use"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = []                      # standard library only
+
+[project.urls]
+Repository = "https://github.com/Dagrinder742/sandbox-tool-win"
+
+[project.optional-dependencies]
+gemini = ["google-genai"]              # only for BACKEND=gemini
+dev = ["pytest"]
+
+[project.scripts]
+sandbox-tool = "sandbox_tool:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["sandbox_tool"]
+
+[tool.setuptools.dynamic]
+version = {attr = "sandbox_tool.__version__"}
+
+[tool.pytest.ini_options]
+# The two suites are plain scripts that print ALL OK; this wrapper lets `pytest` run them.
+python_files = ["test_pytest_wrapper.py"]
+testpaths = ["tests"]

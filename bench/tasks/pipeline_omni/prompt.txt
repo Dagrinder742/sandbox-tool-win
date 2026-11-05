@@ -1,0 +1,9 @@
+This folder holds a small pipeline of three files: ingest.py, calc.py and main.py. Running main.py crashes. main.py is correct: do NOT change it. Find the bugs in ingest.py and calc.py and fix them with replace_def or patch_file; do not rewrite a whole file with write_file.
+
+What the code must do:
+- ingest.py: DataIngester(rows).clean() returns only the valid rows: "item" is a non-empty string AND "qty" is greater than 0. In every row it returns, "price" is a float (the raw data has prices as strings, like "1.50").
+- calc.py: subtotal(rows) is the sum of price * qty. average_order(rows) is subtotal / number of rows, and 0.0 when there are no rows. summary(rows) returns orders, subtotal, tax (8%), total and average, rounded to 2 decimals.
+
+Run main.py to see what happens, read the traceback to find which file and function the error comes from, fix it, and run main.py again. Repeat until it works. When you are done, running main.py must print exactly these two lines:
+orders=3 subtotal=58.00 tax=4.64 total=62.64 average=19.33
+orders=0 subtotal=0.00 tax=0.00 total=0.00 average=0.00

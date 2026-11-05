@@ -1,0 +1,11 @@
+Create stack.py containing a class Stack with these methods:
+
+push(item): add item on top.
+pop(): remove and return the top item. If the stack is empty, raise IndexError("pop from empty stack").
+peek(): return the top item WITHOUT removing it. If the stack is empty, raise IndexError("peek from empty stack").
+is_empty(): return True if there are no items, otherwise False.
+size(): return how many items are in the stack.
+
+A new Stack starts empty. Items come out in last-in, first-out order. Keep the items in a list stored in self.items.
+
+Do not print anything when the file is imported. At the bottom of the file: if __name__ == "__main__": create a Stack, push 1, 2 and 3, pop once, then print "size: " followed by the size.

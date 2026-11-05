@@ -1,0 +1,10 @@
+The file average.py has bugs. Fix them with replace_def or patch_file; do not rewrite the whole file with write_file.
+
+What the functions must do:
+- average(numbers): the mean of the numbers. For an empty list it must return 0.0.
+- median(numbers): for an odd number of items, the middle value of the sorted numbers. For an even number of items, the mean of the two middle values (median([1, 2, 3, 4]) is 2.5). It must NOT change the list it is given.
+
+Run the file to see what happens, find the problems, and fix them. When you are done, running average.py must print these three lines:
+2.5
+2.5
+0.0

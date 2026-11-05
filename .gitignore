@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+# created when you run the tool or the benchmark kit
+sandbox/
+*.refused.log
+file_index.txt
+bench/runs/
+bench/work/
+bench/reports/
+bench/exports/

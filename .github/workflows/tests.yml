@@ -1,0 +1,35 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python tests/test_sandbox_tool.py
+      - run: python bench/test_bench.py
+  macos:                      # not verified by the author: allowed to fail until someone checks it
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python tests/test_sandbox_tool.py
+  windows:                    # sandbox-tool-win: native run_python via Job Objects. Allowed to fail until verified
+    runs-on: windows-latest    # on a real Windows machine (W2 is verified only on Linux with a stand-in job)
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python src/sandbox_tool.py --selfcheck
+      - run: python tests/test_sandbox_tool.py

@@ -1,0 +1,5 @@
+The file sales.csv has a header row and the columns item,qty,price. Look at it with read_file first.
+
+Write total.py. It reads sales.csv from the current folder, adds up qty * price over all the rows, and prints exactly "Total: " followed by the sum with 2 decimals, for example: Total: 6.50
+
+The program must work for ANY rows in sales.csv, not only the ones you see now, so read the file in your code and do not copy numbers into it. Use the csv module. If the file has only the header row, print Total: 0.00

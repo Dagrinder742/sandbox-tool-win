@@ -1,0 +1,207 @@
+# =========================================================
+#              AGENT HANDOVER: sandbox-tool-win
+# =========================================================
+"""
+This repo is the WINDOWS line of sandbox_tool.py: native PowerShell, with run_python (and so the DONE gate and the
+expected-output gate) switched ON through Windows Job Objects. It was created from the Linux repo's update 25
+(tool_sha f6e3b9a9cb) on 2026-11-04 at Casey's request, to keep the Linux work and its baselines untouched.
+The Linux line continues in sandbox-tool (info_4.txt, numbered UPDATE entries). This line uses W-numbered entries.
+
+Casey's reasons (his words, 2026-11-04): "running natively through PowerShell commands", "PowerShell works faster
+with Llama server and works better with my windows system", "to preserve our Linux work we can make a new repo".
+Working method is the same as the Linux line: Claude writes and reviews code and tests; Casey runs the commands on
+his Windows 11 PC (PowerShell, Python 3.14, C:\Python314) and pastes the output; no source change without review;
+every change gets tests and is proven by breaking it on a scratch copy; UNVERIFIED and NEXT in every entry.
+
+SHARED-CHANGE LIST (the two repos share most of sandbox_tool.py; port these by hand, never silently)
+ - Linux -> Windows, still to port: the planned Linux update 26 (memory watchdog counts VmRSS + VmSwap; the memory
+   test gets its own longer time limit). The Windows path does not need the VmSwap part (the Job Object cap counts
+   committed memory, swap included), but the POSIX path in this repo should stay identical to Linux.
+ - Windows -> Linux, safe to port (no-ops on POSIX, tested there): the runner's normcase / both-separator '..' check
+   / os.devnull device / Windows-only audit events; the runner refusing to run unless it reads exactly "go"
+   (only active with handshake); the four new --selfcheck limit lines (time, memory, start programs, output).
+ - Windows only: _WinJob, _run_python_job, _job_result, _job_python, _has_job_objects, RUN_MAX_WRITE_MB.
+"""
+
+
+W1 (2026-11-04) FROM CLAUDE: JOB OBJECT PROBE ON CASEY'S PC (win_probe.py, standalone, not part of the repo)
+Machine: Windows 11 10.0.26300 (AMD64), Python 3.14.10 64-bit, C:\Python314\python.exe (no venv), not already in a job.
+Result: 6 PASS, 1 FAIL (the FAIL was the probe's own threshold, see 5).
+ 1 structure layout 144 bytes: as the Win32 headers. 2 a child can be put in a job: yes (0.16 s).
+ 3 memory cap 256 MB: the script got MemoryError after 260 MB, peak 254 MB (the cap counts committed memory, swap
+   included: stricter than the Linux /proc RSS watchdog). 4 one-process limit: starting another program fails with
+   winerror 1816. 5 CPU-time cap 2 s: Windows DID stop the loop (exit 0xC0000044 = STATUS_QUOTA_EXCEEDED, not the
+   probe's fallback), but only after 9.3 s: Windows checks per-process CPU time only periodically. So the CPU cap is a
+   backstop; the wall-clock deadline in the tool stays the real timer. 6 closing the job killed the child after 1.5 s,
+   BUT its exit code was 0: a killed run must never be judged by its exit code (the tool ends the job with an explicit
+   code). 7 plain python starts normally (0.11 s) with all limits at once.
+Conclusion: Job Objects are a sound base for a Windows run_python.
+
+
+W2 (2026-11-04) FROM CLAUDE: NATIVE WINDOWS run_python THROUGH JOB OBJECTS (built on Linux; NOT YET RUN ON WINDOWS)
+CHANGE (sandbox_tool.py; the POSIX path is unchanged and the SYSTEM prompt is unchanged, system_sha 000c5f86b8):
+ - RUN_PYTHON is on when the POSIX limits exist OR Windows Job Objects exist (new _has_job_objects(): a capability
+   check, not an OS-name check).
+ - cmd_run_python takes the job path (_run_python_job) where POSIX limits do not exist. Each run gets its own Job
+   Object (_WinJob: all Win32 calls in one class): memory cap = RUN_MEM_MB, at most ONE process, kill on close, die on
+   an unhandled crash, CPU-time backstop RUN_TIMEOUT_S + 2. The BASE python.exe is started (a venv python.exe is a
+   launcher that starts a second process, which the one-process limit would block). The child's env adds TEMP/TMP
+   (the run's own temp folder) and SystemRoot/ComSpec/PathExt if present; nothing else passes through.
+ - Handshake: the child installs the audit hook and then waits for exactly "go" on stdin; the tool sends it only after
+   AssignProcessToJobObject succeeded, then closes stdin (so the script's input() gets end-of-file at once). If the job
+   cannot be created or the child cannot be put in it, the child is killed and the script is NOT run (fail closed).
+   Second layer: a runner that reads anything but "go" (e.g. end-of-file) exits 126 without running the script.
+ - Wall-clock deadline RUN_TIMEOUT_S: TerminateJobObject(124) -> "[exit 124] TIMED OUT ..." (same text as POSIX).
+   Windows' own CPU-cap code 0xC0000044 is reported the same way.
+ - No per-file size limit exists in a job, so the job's total bytes written (files + output, from its IO accounting)
+   are capped at RUN_MAX_WRITE_MB = 2 x RUN_MAX_FILE_MB = 40 MB -> TerminateJobObject(125), "[exit 1] (output
+   reached the 40MB limit ...)". The POSIX path keeps its 20 MB per-file limit.
+ - The job's memory cap makes allocation fail (MemoryError) instead of killing; when the run failed and the job's peak
+   memory reached the cap, the result reads "[exit 137] KILLED: the script used more than N MB" like the POSIX
+   watchdog. A MemoryError well below the cap stays the script's own error.
+ - Windows crash statuses (>= 0xC0000000) are named in the result.
+ - Runner (_RUNNER): resource/_posixsubprocess imported only where they exist; on Windows _winapi.CreateProcess is
+   replaced (the job blocks it anyway); paths compared with normcase (Windows ignores case); '..' found with both
+   separators; os.devnull allowed; os.startfile, _winapi.CreateProcess / OpenProcess / TerminateProcess /
+   CreateNamedPipe, os.add_dll_directory and every winreg event are blocked; _winapi.CreateFile must stay in the
+   sandbox. All of these are no-ops on Linux (proven: the Linux suite is unchanged).
+ - --selfcheck: reports which limits are in use (POSIX or Windows Job Object, and which python.exe the job starts) and
+   now EXERCISES them with short test limits: infinite loop stopped at 3 s ([exit 124]), allocation stopped at 200 MB
+   ([exit 137]), starting another program fails, endless output stopped and capped. Linux: 26 ok (was 22).
+ - The "run_python is switched off" message no longer says "or this is Windows".
+ - pyproject: Windows classifier. CI: a windows-latest job (allowed to fail until verified; the repo is not pushed).
+TESTS (Linux, Python 3.13): 482 checks ALL OK (+19). Layer 1, the WHOLE job path run for real on Linux with a stand-in
+ for the five _WinJob methods (/proc/<pid>/io counts bytes written like the job's IO accounting): runs a script with
+ TEMP = run folder; the script does not start before it is inside the job; reading outside still blocked; input()
+ fails fast; deadline -> 124; write cap -> stopped; memory cap -> [exit 137] KILLED; a small MemoryError stays the
+ script's own; starting a program blocked; every job closed; timeout/write cap end the job with 124/125; job limits
+ passed; assignment failure -> child killed at once AND the script never runs; job creation failure -> not run;
+ runner without exactly "go" runs nothing (exit 126); 0xC0000044 -> timeout; crash status named; BASE python used.
+ Layer 2 (runs only where Job Objects exist, i.e. on Casey's PC): the same scenarios with the REAL _WinJob, including
+ a real 200 MB memory cap. RUN_PYTHON=0: 0 FAIL, 78 skipped. test_bench ALL OK x2, bench selftest ALL VERIFIERS BEHAVE,
+ pytest 2 passed, --selfcheck 26 ok. Broke 13 rules on scratch copies (handshake, assignment failure ignored, runner
+ accepting end-of-file, job creation failure ignored, no explicit kill code, write cap, memory message both ways, TEMP,
+ CPU-cap code, job not closed, stdin left open): all 13 caught. The first break run found a real gap (a child left
+ alive after a failed assignment would have read end-of-file and run unconfined): fixed with the strict "go" check.
+HASHES: tool_sha cf6589fb1e (Linux update 25 was f6e3b9a9cb), system_sha 000c5f86b8 (unchanged).
+UNVERIFIED (everything that needs real Windows): the _WinJob calls inside the tool (the probe proved the same calls
+ work standalone); the real-job test block; the runner's Windows-only changes (normcase, _winapi, winreg, CreateFile);
+ the IO-accounting write cap; Python 3.14 on Windows. EXPECTED: the test suite on Windows now runs the ~78 checks that
+ were skipped there; some were written with POSIX in mind (symlinks, /etc/passwd, dir_fd, chmod), so a triage round
+ like Linux update 20 is likely. Every FAIL line is real information.
+NEXT (Casey, PowerShell, in a NEW folder, not the Android Studio copy):
+ (1) Expand-Archive the zip into e.g. $HOME\sandbox-tool-win and cd into the sandbox-tool-win folder inside it.
+ (2) python src\sandbox_tool.py --selfcheck   -> paste all of it (expect about 25 ok, 0 FAIL, no run_python skip).
+ (3) python tests\test_sandbox_tool.py 2>&1 | Select-String "^FAIL|^NOTE|FAILURES|ALL OK"   -> paste it.
+ Then W3: triage those results; later W4: the bench on Windows (verifier per-check timeout without SIGALRM, killing the
+ whole agent tree on a run timeout).
+
+
+W3 (2026-11-04) FROM CLAUDE: FIRST REAL WINDOWS RUN OF W2 = THE JOB OBJECT PATH WORKS; 9 TEST FAILURES, ALL TEST ASSUMPTIONS
+Casey's run (PowerShell, Windows 11 10.0.26300, Python 3.14.10, C:\Python314; repo in $HOME\sandbox-tool-win):
+ --selfcheck: 25 ok, 0 FAIL, 0 warn, 0 skip. VERIFIED ON REAL WINDOWS: run_python runs inside a Job Object
+ (python started: C:\Python314\python.exe); an infinite loop is stopped at 3.1 s ([exit 124]); a script that keeps
+ allocating is stopped at the 200 MB cap ([exit 137]); a script cannot start another program; endless output is
+ stopped and capped by the write cap; a script cannot read a file outside the sandbox; all file and path checks ok.
+ One selfcheck line was scrambled on screen by a Windows carriage return inside the output (the count shows it passed).
+ Test suite: 9 FAILURES. The real-Job-Object block (winreal: deadline, write cap, real 200 MB memory cap, no programs,
+ handshake run, no reading outside, input() fails fast) printed NO FAIL line, so it passed on Windows.
+Triage of the 9 (all are the tests' own POSIX assumptions; in none did anything escape: no marker file was made):
+ - pre-scan refuses os.system / from-import alias / import subprocess, runtime blocks obfuscated os.system /
+   subprocess via __import__ / os.exec (6): the tests pasted the marker path into code inside quotes ('%s'); on
+   Windows that is 'C:\Users\...', where \U starts an escape, so the TEST script had a SyntaxError (reproduced on
+   Linux with a Windows path). The pre-scan skips files that do not parse, so the run failed before reaching the
+   thing the test checks. Fixed: paths go in as Python literals (%r); Linux unchanged.
+ - runtime blocks os.fork: Windows has no fork (AttributeError). Now: where fork exists it must be blocked; where it
+   does not, the check confirms the script cannot get one.
+ - runtime blocks low-level fork_exec: _posixsubprocess is POSIX-only. Now POSIX-only, and a NEW Windows check:
+   the low-level _winapi.CreateProcess is blocked (it was missing before).
+ - runtime blocks dir_fd '..' trick: Windows has no dir_fd and cannot os.open a folder, so the trick cannot start.
+   Now: where dir_fd exists it must be blocked; elsewhere the check confirms nothing outside is read.
+ - (added after Casey's next run) bench/test_bench.py "verifier refuses to execute files with blocked constructs":
+   the same problem in the bench kit: the test's evil.py pasted the marker path into os.system('...'), a SyntaxError
+   on Windows, so the verifier reached the import (and failed there) instead of refusing the blocked call. Nothing ran,
+   no marker. Fixed with %r. A search of both test files found no other path pasted into quotes (the two base64
+   checks paste base64 text, which has no backslashes; the fork_exec check runs only on POSIX).
+CHANGE (sandbox_tool.py, cosmetic): --selfcheck detail text has carriage returns and line breaks replaced by spaces.
+TESTS (Linux): 482 checks ALL OK (the fixed checks take their POSIX branches); RUN_PYTHON=0 ALL OK; test_bench ALL OK;
+ --selfcheck 26 ok. The Windows branches (no-fork check, _winapi.CreateProcess check, no-dir_fd check) cannot run here.
+HASHES: tool_sha 588ef7bba3 (W2 was cf6589fb1e; only the selfcheck display changed), system_sha 000c5f86b8.
+UNVERIFIED: the new Windows-branch checks (expected PASS); everything the suite does not print a FAIL line for counted
+ as passing on Windows (the Select-String filter only showed FAIL lines).
+NEXT (Casey, PowerShell): replace the repo with the W3 zip (Expand-Archive -Force into the same place), then
+ python tests\test_sandbox_tool.py 2>&1 | Select-String "^FAIL|ALL OK|FAILURES"   -> expect ALL OK.
+ python src\sandbox_tool.py --selfcheck   -> expect 25 ok and a readable "cannot read a file outside" line.
+ Then W4: the bench on Windows (verifier per-check timeout without SIGALRM, killing the whole agent tree on a run
+ timeout) so pipeline_omni_v2 can run in PowerShell with the gates on.
+
+W3 RESULT (2026-11-04, Casey, PowerShell, W3 zip, tool_sha 588ef7bba3): python tests\test_sandbox_tool.py -> ALL OK;
+python bench\test_bench.py -> ALL OK. VERIFIED ON REAL WINDOWS: the whole main suite with run_python ON (the 78 checks
+that used to be skipped there, the real-Job-Object block, the new no-fork / _winapi.CreateProcess / no-dir_fd checks)
+and the whole bench kit (fake-server runs, verifier selftests, reports). Native Windows run_python is done: the DONE
+gate and the expected-output gate work in PowerShell.
+NOTE FOR W4: when the bench kills a run that exceeds BENCH_RUN_TIMEOUT it kills only the agent process; on Windows
+its run_python child still dies, because the agent's Job Object handle closes with it (kill on job close). Still
+weaker than Linux on Windows: the verifier runs the model's final files with a 90 s timeout but without CPU / memory /
+file limits (the POSIX preexec limits do not exist there), and vkit's per-check 10 s timeout uses SIGALRM, which
+Windows lacks (a hanging check waits for the 90 s verifier timeout). The verifier only runs files that passed the
+blocked-construct scan.
+
+W4 (2026-11-05) FROM CLAUDE: FIRST NATIVE WINDOWS CAMPAIGN (0/10, 3.3x FASTER), A DONE-GATE BUG IT FOUND, AND THE BENCH
+VERIFIER HARDENED FOR WINDOWS. Casey's decision: work on the PowerShell line only for now; the Linux items are parked in
+the project note claude/linux-update26-parked.md.
+Report 20261104-2217-win-w3-omni2: Windows PowerShell, Python 3.14.10, tool_sha 588ef7bba3 (W3), system_sha 000c5f86b8,
+ pipeline_omni_v2 prompt 08814efaef, verifier 48489e5b3b, expected-output gate ON. 0/10 PASS, 0 false-DONE; 6 aborted
+ (3 refusals in a row), 3 step limit, 1 stopped after 3 blocked DONEs. 623 s per run (1 h 44 min in total).
+SPEED: prompt reading 10.3 tok/s here vs 1.7 tok/s on WSL (generation 3.1 vs 3.3 tok/s, the same). Runs take a third of
+ the time (623 s vs 2043 s; a first reply 104 s instead of 893 s). Probably the WSL VM's CPU limit; not confirmed.
+TWO GROUPS:
+ A (runs 1, 2, 7, 9): fixed ingest.py itself, BOTH the price cast and the qty filter: the cross-file root cause no WSL
+   or Termux run found. All four then stuck on the empty-list ZeroDivisionError, blaming DataIngester([]).clean() (the
+   main.py line visible in the traceback) instead of calc.average_order. Run 1 (12/13) put the guard in summary(): the
+   output was right, but the task says average_order([]) must return 0.0, so that check fails. Not step-starved.
+ B (runs 3, 4, 5, 6, 10): the WSL pattern: cast in calc.py, guard fixed, orders=4; the gate refused 9 DONEs in total;
+   none then went to the filter.
+BUG FOUND (shared code, also in the Linux line): run 1 said DONE after a run with the CORRECT output and the gate
+ refused it: "these were REFUSED and never applied: replace_def ingest.py". That edit HAD been applied; its only
+ refusal was "this exact edit was already applied". The gate stored every refused edit as pending, including no-ops.
+ Seen in 1 of the 50 runs in all reports so far; it cost no pass (run 1 was 12/13 by the task's contract anyway).
+CHANGE 1 (sandbox_tool.py): three refusals now mean "the file already has it" and are NOT stored as unapplied edits:
+ "this exact edit was already applied", "that is the same code the file already has", "SEARCH and REPLACE are
+ identical, so nothing would change". Still stored (the intended code was not applied): "...identical, and code was
+ found AFTER the >>>>>>> REPLACE line", "search text not found", and every other refusal.
+CHANGE 2 (bench, Windows verifier): (a) bench/tasks/vkit.py: where SIGALRM does not exist (Windows), each check runs in a
+ watcher thread with the same 10 s limit; a hung check times out, the other checks still run, and the real stdout is
+ restored after a timeout and again before the results are printed (a check hung inside load()/quiet() would otherwise
+ keep stdout redirected and the VERIFY line would be lost; the two restores back each other up). VKIT_NO_ALARM=1 forces
+ this path (tests). Linux keeps SIGALRM. (b) bench.py: on Windows the verifier runs inside a Job Object (_WinJob from
+ the tool, now with a procs setting: memory cap 1024 MB, at most 4 processes because the verifier starts `python
+ main.py` for the output check, killed with code 124 on timeout, closed afterwards). It is started through a small
+ wrapper that waits for exactly "go", sent only after it is inside the job (end-of-file -> exit 126, nothing runs).
+ If it cannot be put in the job it is killed and the run is recorded as FAIL with the reason. Linux keeps its preexec
+ CPU / file-size limits; a machine with neither keeps the old timeout-only behaviour.
+CHANGE 3 (repo): LICENSE "Copyright (c) 2026 Casey Vaughan"; README titled sandbox-tool-win with the repository link
+ https://github.com/Dagrinder742/sandbox-tool-win and the clone line; pyproject [project.urls] Repository. Version
+ 0.1.0+win.4. The repo was searched for the Windows username, email and personal paths: none.
+TESTS (Linux): main suite 487 checks ALL OK (+5: an edit sent twice, a replace_def with the same code, and a patch with
+ SEARCH == REPLACE no longer block DONE after a clean run; SEARCH == REPLACE with code after the block, and a SEARCH
+ that does not exist, still do). Against the unfixed gate the three no-op checks FAIL. RUN_PYTHON=0 ALL OK (78
+ skipped). test_bench 60 checks ALL OK x2 (+7: vkit without SIGALRM times a hanging check out at 10 s while the others
+ run; a file that hangs at import still gets its VERIFY line; the verifier job path PASSes the good file with the
+ right limits, starts it through the "go" wrapper, kills it if it cannot be put in the job, ends an overrunning one
+ with 124; the wrapper runs nothing on end-of-file). Bench selftest ALL VERIFIERS BEHAVE with and without
+ VKIT_NO_ALARM; pytest 2 passed; --selfcheck 26 ok. Broke 11 rules on scratch copies: 9 caught directly; the 2 stdout
+ restores are a deliberate redundant pair (removing either alone changes nothing; removing both is caught).
+HASHES: tool_sha eef97453be (W3 was 588ef7bba3), system_sha 000c5f86b8 (unchanged), pipeline_omni_v2 prompt
+ 08814efaef and verifier 48489e5b3b (unchanged; vkit.py changed, which is not part of the verifier hash).
+UNVERIFIED: the verifier's real Windows Job Object (the stand-in only replaces the Win32 calls); vkit's thread path on
+ Windows (expected to behave as on Linux with VKIT_NO_ALARM=1); the gate fix on a real model run.
+NEXT (Casey, PowerShell): (1) Expand-Archive the W4 zip into a NEW folder for git (e.g. $HOME\git-sandbox-tool-win),
+ then: python tests\test_sandbox_tool.py 2>&1 | Select-String "^FAIL|ALL OK|FAILURES" and
+ python bench\test_bench.py 2>&1 | Select-String "^FAIL|ALL OK|FAILED"   (expect ALL OK twice).
+ (2) First push from that folder: git init -b main; git add .; git status (no bench\runs, bench\work, bench\reports,
+ sandbox, __pycache__); git commit; git remote add origin https://github.com/Dagrinder742/sandbox-tool-win.git;
+ git push -u origin main. GitHub Actions then runs Linux 3.10-3.13, macOS and Windows (macOS/Windows allowed to fail).
+ (3) Then the next measured change: the field-level diff in the expected-output refusal (group B), on the same prompt.
+
+# The current source is src/sandbox_tool.py in this repo's zip (not copied here, to keep this file short).

@@ -1,0 +1,17 @@
+Create skill.py containing a class Skill. Follow this contract exactly.
+
+State: __init__ sets self.state = {"metrics": {}, "history": []}.
+
+perceive(): fill self.state["metrics"] with three random integers: temperature (10 to 30), humidity (40 to 80), light (0 to 100). Print "Perceive: " followed by the metrics. Return the metrics dict.
+
+reason(): ALWAYS return a list of exactly 3 different action strings. Never return fewer than 3, and do not use if-statements that can leave the list short. Print "Reason: " followed by the list.
+
+evaluate(actions): score each action with len(action), which is its number of characters. Return the action with the highest score. If two actions tie, return the first one. Print "Evaluate: " followed by the scores.
+
+act(action): print "Act: " followed by the action. Return the action.
+
+think(rounds=3): repeat `rounds` times: call perceive(), reason(), evaluate() and act() in that order, passing results along (evaluate receives reason's list, act receives evaluate's result), and append the chosen action to self.state["history"]. Return self.state["history"].
+
+At the bottom of the file: if __name__ == "__main__": Skill().think()
+
+No pass, no TODO, no placeholder code. Every method must contain real logic.

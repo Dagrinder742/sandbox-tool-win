@@ -1,0 +1,17 @@
+Your first reply must be only this line:
+CMD: run_python main.py
+
+This folder holds three files: ingest.py, calc.py and main.py. Running main.py crashes. main.py is correct: never change it. The bugs are in ingest.py and calc.py.
+
+How to work:
+1. Run main.py and read the traceback. Its last lines name the file and the function where the error happened.
+2. Fix ONE file with replace_def or patch_file (for a method, replace_def needs Class.method). Do not use write_file.
+3. Run main.py again in the same reply. Repeat steps 2 and 3 until main.py prints exactly the two lines at the end of this task.
+
+What the code must do:
+- ingest.py: DataIngester(rows).clean() keeps only the rows whose "item" is a non-empty string and whose "qty" is greater than 0. The raw prices are strings like "1.50": clean() must convert the price of every row it keeps to a float. Never drop a row because of its price.
+- calc.py: subtotal(rows) is the sum of price * qty. average_order(rows) is subtotal / number of rows, and 0.0 when there are no rows. summary(rows) returns orders, subtotal, tax (8%), total and average, rounded to 2 decimals.
+
+When you are done, running main.py must print exactly these two lines:
+orders=3 subtotal=58.00 tax=4.64 total=62.64 average=19.33
+orders=0 subtotal=0.00 tax=0.00 total=0.00 average=0.00

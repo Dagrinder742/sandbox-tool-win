@@ -1,0 +1,28 @@
+Create skill.py containing a class Skill. Follow this contract exactly.
+
+State: __init__ sets self.state = {
+    "metrics": {},
+    "history": [],
+    "energy": 100,
+    "cycles": 0
+}.
+
+perceive(): set self.state["metrics"] to a dictionary containing three random integers: temperature (10 to 30), humidity (40 to 80), light (0 to 100). Print "Perceive: " followed by this metrics dict. Return self.state["metrics"].
+
+reason(metrics): accept the metrics dict from perceive(). Start with a base list of 3 actions: ["scout", "patrol", "rest"]. If metrics["temperature"] > 25, replace the first action with "cool_down". If metrics["light"] < 20, replace the second action with "illuminate". Ensure the list always contains exactly 3 items. Print "Reason: " followed by the list. Return the list.
+
+evaluate(actions): score each action in `actions` with len(action). Return the action string with the highest score. If tied, return the first one. Print "Evaluate: " followed by the scores list or dict.
+
+act(action): deduct 15 from self.state["energy"] (clamp minimum at 0). Increment self.state["cycles"] by 1. Print "Act: " followed by the action and remaining energy. Return the action.
+
+think(rounds=3): repeat `rounds` times: call perceive(), pass its return value to reason(), pass reason's return value to evaluate(), pass evaluate's return value to act(), and append the chosen action to self.state["history"]. If self.state["energy"] reaches 0, stop early. Return self.state["history"].
+
+report(): return a dict containing {"total_cycles": self.state["cycles"], "remaining_energy": self.state["energy"], "actions_taken": len(self.state["history"])}. Print "Report: " followed by this dict.
+
+At the bottom of the file: 
+if __name__ == "__main__":
+    s = Skill()
+    s.think()
+    s.report()
+
+No pass, no TODO, no placeholder code. Every method must contain real logic.

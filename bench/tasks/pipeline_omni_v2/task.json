@@ -1,0 +1,1 @@
+{"title": "pipeline_omni with prompt v2: run first, one file per fix, convert-not-filter price wording", "output": "main.py", "outputs": ["calc.py", "ingest.py"], "difficulty": 5, "max_steps": 14}

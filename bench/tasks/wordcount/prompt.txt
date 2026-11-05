@@ -1,0 +1,7 @@
+Create wc.py with two functions.
+
+count_words(text): return a dict mapping each word to how many times it appears. Make everything lowercase. Words are separated by whitespace. Remove these punctuation characters from both ends of each word: . , ! ? ; : " ' ( ). Punctuation in the MIDDLE of a word stays: "it's" stays "it's", it is not turned into "its". Example: count_words("It's, (fine)! fine.") returns {"it's": 1, "fine": 2}. Do it word by word: split the text on whitespace first, then remove those characters from the ends of EACH word separately. Do not clean the whole text at once, and do not use string.punctuation, str.translate or re.sub. Ignore items that are empty after removing them. count_words("") returns {}.
+
+top_words(text, n): return a list of (word, count) tuples for the n most frequent words, highest count first. If counts tie, put those words in alphabetical order. If there are fewer than n different words, return all of them.
+
+Do not print anything when the file is imported. At the bottom of the file: if __name__ == "__main__": print(top_words("the cat and the hat and the bat", 2))

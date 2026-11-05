@@ -10,7 +10,8 @@ Let a small local model (or Gemini) work in **one folder** on your machine: read
 write Python, run it and fix what breaks, without giving it a shell.
 
 It was built to make a 3B-parameter model (Qwen2.5-Coder-3B on a phone) usable as a coding agent, so
-many of its rules exist because a small model did something silly without them. It is a single Python file with
+most of its rules exist because a small model made a specific, repeated mistake without them (each one is
+recorded in `info_win.txt`). It is a single Python file with
 no dependencies beyond the standard library.
 
 > **Read "What it does not protect against" before pointing this at anything you care about.**

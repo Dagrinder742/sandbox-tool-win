@@ -56,7 +56,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-__version__ = "0.1.0+win.6"
+__version__ = "0.1.0+win.7"
 
 
 def _default_sandbox() -> Path:
@@ -1201,6 +1201,20 @@ def _fuzzy_replace(content, search_text, replace_text):
     return "\n".join(f_lines[:i] + new + f_lines[i + n:])
 
 
+_GUTTER = re.compile(r"^ *\d+ \|(?: |$)")
+
+
+def _strip_gutter(text: str):
+    """read_file shows '  10 | code'. A small model sometimes copies that column into SEARCH/REPLACE (win-W6-omni2
+    run 10: the right fix, refused 7 times as 'not found'). If EVERY non-empty line starts with that column, return
+    the text without it; otherwise None (nothing is guessed for a mixed block)."""
+    lines = text.split("\n")
+    body = [l for l in lines if l.strip()]
+    if not body or not all(_GUTTER.match(l) for l in body):
+        return None
+    return "\n".join(_GUTTER.sub("", l, count=1) for l in lines)
+
+
 def cmd_patch_file(path_str: str, search_text: str, replace_text: str) -> str:
     """Safe built-in tool to patch an existing file via unique search/replace blocks."""
     try:
@@ -1213,6 +1227,16 @@ def cmd_patch_file(path_str: str, search_text: str, replace_text: str) -> str:
 
         if not search_text:
             return "REFUSED: search text is empty"
+        gnote = ""
+        if search_text not in content:          # the file's own text always wins; only then look for a copied column
+            s2 = _strip_gutter(search_text)
+            if s2 is not None and s2.strip():
+                search_text = s2
+                r2 = _strip_gutter(replace_text)
+                if r2 is not None:
+                    replace_text = r2
+                gnote = (" (the line numbers copied from read_file, like '  10 | ', were removed: never put them in "
+                         "SEARCH or REPLACE)")
         if search_text == replace_text:
             return ("REFUSED: SEARCH and REPLACE are identical, so nothing would change. "
                     "Write the corrected lines in REPLACE (keep the file's leading spaces).")
@@ -1252,7 +1276,7 @@ def cmd_patch_file(path_str: str, search_text: str, replace_text: str) -> str:
                             f"exact lines, then send a corrected patch.")
         _write_text(target, new_content, crlf)
         log_to_index(path_str, "patched")
-        return f"[exit 0]\nSuccessfully patched {path_str}{note}"
+        return f"[exit 0]\nSuccessfully patched {path_str}{note}{gnote}"
     except Refused as e:
         return f"REFUSED: {e}"
     except Exception as e:

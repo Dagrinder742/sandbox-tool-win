@@ -231,6 +231,41 @@ check(_r.startswith("[exit 0]") and (SB / "broken.py").read_text().startswith("d
 (SB / "notes.txt").write_text("a {\n")
 _r = T.run("patch_file notes.txt", "<<<<<<< SEARCH\na {\n=======\nb (\n>>>>>>> REPLACE\n")
 check(_r.startswith("[exit 0]"), "patchguard", "non-.py files are not syntax-checked")
+# ---- W7: line numbers copied from read_file ('  10 | ') are removed (win-W6-omni2 run 10: 7 refusals) ----
+_ING = ('class DataIngester:\n    """Loads raw order rows and keeps only the valid ones."""\n\n    def __init__(self, rows):\n'
+        '        self.rows = rows\n\n    def clean(self):\n        good = []\n        for row in self.rows:\n'
+        '            if row.get("item") and row.get("qty", 0) >= 0:\n'
+        '                good.append({"item": row["item"], "price": row["price"], "qty": row["qty"]})\n        return good\n')
+(SB / "g_ing.py").write_text(_ING)
+_r = T.run("patch_file g_ing.py", '<<<<<<< SEARCH\n  10 |             if row.get("item") and row.get("qty", 0) >= 0:\n=======\n'
+                                  '  10 |             if row.get("item") and row.get("qty", 0) > 0:\n>>>>>>> REPLACE\n')
+_t = (SB / "g_ing.py").read_text()
+check(_r.startswith("[exit 0]") and 'row.get("qty", 0) > 0:' in _t and " | " not in _t and "line numbers copied from read_file" in _r,
+      "gutter", "the real run-10 patch (line numbers in SEARCH and REPLACE) applies, without the numbers, and says so", _r[:200])
+(SB / "g_ing.py").write_text(_ING)
+_r = T.run("patch_file g_ing.py", '<<<<<<< SEARCH\n   9 |         for row in self.rows:\n  10 |             if row.get("item") and row.get("qty", 0) >= 0:\n'
+                                  '=======\n        for row in self.rows:\n            if row.get("item") and row.get("qty", 0) > 0:\n>>>>>>> REPLACE\n')
+_t = (SB / "g_ing.py").read_text()
+check(_r.startswith("[exit 0]") and 'row.get("qty", 0) > 0:' in _t and " | " not in _t, "gutter",
+      "numbers only in SEARCH (two lines): SEARCH is matched without them, REPLACE is used as written", _r[:120])
+(SB / "g_ing.py").write_text(_ING)
+_r = T.run("patch_file g_ing.py", '<<<<<<< SEARCH\n   9 |         for row in self.rows:\n            if row.get("item") and row.get("qty", 0) >= 0:\n'
+                                  '=======\n        for row in self.rows:\n            if x:\n>>>>>>> REPLACE\n')
+check(_r.startswith("REFUSED") and "not found" in _r and (SB / "g_ing.py").read_text() == _ING, "gutter",
+      "a SEARCH where only some lines have numbers is not guessed at: refused, file unchanged", _r[:100])
+(SB / "g_ing.py").write_text(_ING)
+_r = T.run("patch_file g_ing.py", '<<<<<<< SEARCH\n  10 |             if row.get("item") and row.get("qty", 0) >= 0:\n=======\n'
+                                  '  10 |             if row.get("item") and row.get("qty", 0) >= 0:\n>>>>>>> REPLACE\n')
+check(_r.startswith("REFUSED") and (SB / "g_ing.py").read_text() == _ING, "gutter",
+      "numbered SEARCH == REPLACE is still refused (nothing would change)", _r[:100])
+(SB / "g_tbl.txt").write_text("  10 | ten\n  11 | eleven\n")
+_r = T.run("patch_file g_tbl.txt", "<<<<<<< SEARCH\n  10 | ten\n=======\n  10 | TEN\n>>>>>>> REPLACE\n")
+check(_r.startswith("[exit 0]") and (SB / "g_tbl.txt").read_text() == "  10 | TEN\n  11 | eleven\n" and "line numbers" not in _r,
+      "gutter", "a file whose own text looks like '  10 | ...' is patched as written (the file's text always wins)", _r[:120])
+check(T._strip_gutter("   3 |\n   4 |     x = 1") == "\n    x = 1" and T._strip_gutter("x = 1") is None
+      and T._strip_gutter("a | b") is None, "gutter", "_strip_gutter: an empty numbered line, no numbers, and a '|' in code")
+for _n in ("g_ing.py", "g_tbl.txt"):
+    (SB / _n).unlink()
 # the exact bad patch from run10 (import placed inside the dict)
 (SB / "run3.py").write_text('class Skill:\n    def perceive(self):\n        m = {\n            "t": random.randint(1, 2),\n        }\n        return m\n')
 _r = T.run("patch_file run3.py", '<<<<<<< SEARCH\n"t": random.randint(1, 2),\n=======\nimport random\n"t": random.randint(1, 2),\n>>>>>>> REPLACE\n')

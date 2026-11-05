@@ -276,4 +276,54 @@ NEXT (Casey, PowerShell): Expand-Archive -Force the W6 zip over the git folder; 
    python bench\bench.py run -t pipeline_omni_v2 -n 10 --label win-W6-omni2
  and send the report (check that the prompt hash is 08814efaef).
 
+W6 RESULT (2026-11-05, Casey, PowerShell): report 20261105-0320-win-w6-omni2, tool_sha b4249f386a, system_sha
+ 000c5f86b8, prompt 08814efaef, verifier 48489e5b3b (comparable with win-W3-omni2). 0/10 PASS, 0 false-DONE; 5 step
+ limit, 4 aborted (3 refusals in a row), 1 stopped after 3 blocked DONEs. 654 s per run (W3: 623 s).
+WHAT W6 CHANGED: the gate refused 10 DONEs in 7 runs (1, 3, 5, 6, 8, 9, 10), the field form in 6 of them (run 8 got
+ the whole-line form: its subtotal etc. were 0.00 too, so every word was wrong). In ALL 7 the model's next edits
+ went to ingest.py. In W3's group B, 0 of 5 did. So the refusal now points the model at the right file (n=7, a screen).
+WHY IT STILL FAILED (the new bottleneck: editing ingest.py correctly):
+ - 5 runs (1, 3, 5, 8, 9) "fixed" a load() method / self.state["items"] = {"bolts": ...} that ingest.py does not
+   have: copied from the STYLE example (class Stock) in the system prompt. Runs 1 and 5 then claimed "orders is now 3"
+   after a run that printed 4; the gate refused it (this is why false-DONE stayed 0).
+ - run 10 had the exact fix (">= 0" -> "> 0") but copied read_file's line-number column ("  10 | ") into SEARCH, 7
+   times: "search text not found" every time. Only run in this report that did it.
+ - run 9 sent the whole class to replace_def ingest.py DataIngester.clean (refused: name mismatch), twice.
+ - run 6 wrote row["qty"].replace(...) on an int (AttributeError), then repeated the same edit.
+ - runs 2, 4, 7 never reached the gate (group A again: ingest.py repeats, "this exact edit was already applied" x5;
+   run 4 replace_def calc.py calc x5).
+CANDIDATES (one at a time): (a) the STYLE example leaks into bug fixes (5/10): prompt change, new system_sha, and the
+ example was added for the skill tasks, so they need re-measuring; (b) patch_file strips a copied "NN | " column when
+ every SEARCH/REPLACE line has it (1/10; tool-side, system_sha unchanged).
+
+W7 (2026-11-05) FROM CLAUDE: patch_file REMOVES LINE NUMBERS COPIED FROM read_file (candidate (b) above; Casey's choice
+"Do b first"). Plus a README wording fix.
+WHY: win-W6-omni2 run 10 had the exact fix (">= 0" -> "> 0") but copied read_file's "  10 | " column into SEARCH and
+ REPLACE; all 7 tries were refused as "search text not found" and the run aborted. 1 run of 10 in this report.
+CHANGE (sandbox_tool.py, new _strip_gutter, used in cmd_patch_file): only when SEARCH is NOT found in the file as
+ written, and EVERY non-empty SEARCH line starts with the read_file column (spaces, a number, " |" then a space or
+ the end of the line), the column is removed from SEARCH; from REPLACE too if every one of its lines has it, else
+ REPLACE is used as written. Then the normal matching, uniqueness, identical and syntax checks run. The success
+ message adds: "(the line numbers copied from read_file, like '  10 | ', were removed: never put them in SEARCH or
+ REPLACE)". A mixed block (only some lines numbered) is not guessed at: refused as before. A file whose own text
+ looks like "  10 | ..." is matched as written (the file's text always wins). replace_def is unchanged.
+ Version 0.1.0+win.7. The system prompt is unchanged (system_sha 000c5f86b8).
+README: "many of its rules exist because a small model did something silly without them" reworded to "most of its
+ rules exist because a small model made a specific, repeated mistake without them (each one is recorded in
+ info_win.txt)", as agreed earlier.
+TESTS (Linux): main suite 503 checks ALL OK (+6: the real run-10 patch applies without the numbers and says so;
+ numbers only in a two-line SEARCH; a mixed block is refused and the file unchanged; numbered SEARCH == REPLACE is
+ still refused; a file whose own lines look numbered is patched as written; _strip_gutter on an empty numbered line,
+ plain code, and a "|" inside code). Python 3.10 / 3.11 / 3.12 / 3.13 ALL OK (both suites); cp1252 ALL OK;
+ RUN_PYTHON=0 ALL OK; bench selftest ALL VERIFIERS BEHAVE; --selfcheck 26 ok. Broke 6 rules on separate scratch
+ copies, all caught: no stripping (2 FAIL), strip even when the file has the text (1), strip a mixed block (1),
+ REPLACE not stripped (1), no note (1), an empty numbered line not handled (1).
+HASHES: tool_sha 6e57f76942 (W6 was b4249f386a); system_sha 000c5f86b8, pipeline_omni_v2 prompt 08814efaef, verifier
+ 48489e5b3b (unchanged).
+HOW TO MEASURE: n=10 cannot show a 1-in-10 effect; the tests are the proof. In later reports, look for the new note
+ ("line numbers copied from read_file ... were removed") and count how often it fires.
+UNVERIFIED: on a real model run (no campaign planned just for W7).
+NEXT: candidate (a), the STYLE example (class Stock) leaking into bug fixes (5/10 runs in win-W6-omni2): a prompt change
+ with a new system_sha. Plan first: re-baseline skill_v4 (the task the example was added for) before removing it.
+
 # The current source is src/sandbox_tool.py in this repo's zip (not copied here, to keep this file short).

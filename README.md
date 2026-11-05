@@ -67,22 +67,54 @@ Things the tool does so a small model keeps on track:
 
 ## Install
 
-Python 3.10 or newer.
+Python 3.10 or newer, and git. The tool uses only the standard library. It is not on PyPI: pip installs it
+straight from this repository and gives you a `sandbox-tool` command you can run from any folder.
 
-```bash
-git clone https://github.com/Dagrinder742/sandbox-tool-win.git && cd sandbox-tool-win
-pip install .                 # or just run:  python src/sandbox_tool.py ...
-pip install ".[gemini]"       # only if you want BACKEND=gemini
+**Just use it** (installs the latest commit of the default branch):
+
+```powershell
+pip install git+https://github.com/Dagrinder742/sandbox-tool-win.git
+sandbox-tool --version
+sandbox-tool --selfcheck        # what works on THIS machine (uses a throwaway folder)
 ```
+
+To update later: `pip install --upgrade --force-reinstall git+https://github.com/Dagrinder742/sandbox-tool-win.git`.
+To remove it: `pip uninstall sandbox-tool`. With Gemini support:
+`pip install "sandbox-tool[gemini] @ git+https://github.com/Dagrinder742/sandbox-tool-win.git"`.
+
+**Work on it or run the benchmark kit** (clone, then an *editable* install, so the `sandbox-tool` command always
+runs the `src/sandbox_tool.py` in your clone, the same file the benchmark measures):
+
+```powershell
+git clone https://github.com/Dagrinder742/sandbox-tool-win.git
+cd sandbox-tool-win
+pip install -e .
+python -c "import sandbox_tool; print(sandbox_tool.__file__)"   # must print ...\src\sandbox_tool.py
+```
+
+Without installing anything you can also run `python src/sandbox_tool.py ...` from a clone.
+
+Notes:
+* On Windows, pip says "Defaulting to user installation" when the Python folder needs admin rights. That is
+  fine. If `sandbox-tool` is then "not recognized", pip printed a warning naming its `Scripts` folder: add that
+  folder to your PATH.
+* Termux and Ubuntu/WSL refuse a plain global `pip install` ("externally managed environment"). Use a virtual
+  environment (`python -m venv .venv`, then activate it) or `pipx install git+https://...`.
+* Installing gives you the command. It does not set `SANDBOX_DIR`; see the quick start below.
+* Verified on Windows 11 with Python 3.14 (both ways).
 
 ## Quick start (local model)
 
 1. Run any OpenAI-compatible chat server. With llama.cpp: `llama-server -m your-model.gguf --port 8080`.
 2. Choose the folder the agent may touch (it must already exist; if you set nothing, `./sandbox` is created):
 
+   ```powershell
+   mkdir "$HOME\agent-sandbox"
+   $env:SANDBOX_DIR = "$HOME\agent-sandbox"     # add this line to $PROFILE to keep it
+   ```
+
    ```bash
-   mkdir -p ~/agent-sandbox
-   export SANDBOX_DIR=~/agent-sandbox
+   mkdir -p ~/agent-sandbox && export SANDBOX_DIR=~/agent-sandbox     # bash / Termux / WSL
    ```
 3. Check the server, then give the agent a task:
 

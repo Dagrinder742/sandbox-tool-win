@@ -395,6 +395,17 @@ WHY ALL 10 STILL FAIL: every run put the price cast in calc.py (float(row["price
 VERDICT: W8 kept (no cost on skill_v4, clear gain here). Open: steering the cast to ingest.py. Not designed yet; it is
  the root-cause problem the task was built to test, so any help must stay general (not "put the cast in ingest.py").
 
+INSTALL VERIFIED (2026-11-05, Casey, Windows 11, Python 3.14.10): `pip install git+https://github.com/Dagrinder742/
+ sandbox-tool-win.git` built and installed sandbox-tool 0.1.0+win.9 from commit 73d13db (user install: C:\Python314
+ needs admin); `sandbox-tool --version` and `--selfcheck` (25 ok) worked from the installed command. Casey then
+ switched to an EDITABLE install (`pip install -e .`): the module resolves to the repo's src\sandbox_tool.py, so the
+ command always runs the same file the bench measures. Selfcheck 25 ok. Not for PyPI yet (+win.9 is a local version
+ label PyPI rejects; name availability unknown; results not there yet).
+ README "Install" rewritten (docs only, tool unchanged): pip install git+https://... for users, clone + pip install -e
+ . for development/bench, update/uninstall/Gemini lines, notes (user install + Scripts on PATH, Termux/WSL need a venv
+ or pipx, installing does not set SANDBOX_DIR); quick start shows the PowerShell way to set SANDBOX_DIR. Name clash to
+ remember (not in the README, the Linux repo is not public): the Linux line uses the same package name, sandbox-tool.
+
 PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
  --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the
  tool; display only, the model always gets the full output, so nothing is comparable-breaking). Side effect: the

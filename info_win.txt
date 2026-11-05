@@ -406,6 +406,14 @@ INSTALL VERIFIED (2026-11-05, Casey, Windows 11, Python 3.14.10): `pip install g
  or pipx, installing does not set SANDBOX_DIR); quick start shows the PowerShell way to set SANDBOX_DIR. Name clash to
  remember (not in the README, the Linux repo is not public): the Linux line uses the same package name, sandbox-tool.
 
+README/SECURITY ACCURACY PASS (2026-11-05, before Casey promotes the repo; docs only, tool unchanged): the Platforms
+ table, the safety section, the tests section, the command table and SECURITY.md still described W1 (run_python
+ "POSIX only, off on Windows", tests never run on Windows, CI never run). Rewritten from verified facts only: Windows
+ selfcheck 25 ok + both suites + CI; Linux CI 3.10-3.13; Termux/WSL not yet run with THIS repo; macOS CI 4 known
+ failures (sed, memory cap) with the two gaps named; Windows Job Object limits listed; replace_lines added to the
+ command table; current Windows results (skill_v4 10/10, pipeline_omni_v2 0/10 with why) added above the old Linux-
+ line results. Intro no longer claims Termux/WSL for this repo.
+
 PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
  --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the
  tool; display only, the model always gets the full output, so nothing is comparable-breaking). Side effect: the

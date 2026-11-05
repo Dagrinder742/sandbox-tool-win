@@ -7,9 +7,10 @@ guarantee safety.** For untrusted models or sensitive data, run it inside a cont
 ## Known limits
 
 - `os.mkfifo`, `os.mknod` and `os.chroot` raise no audit event.
-- `run_python` is POSIX only and is switched off on Windows. macOS is untested.
-- Python 3.10 is allowed by `pyproject.toml` and is in the CI test matrix, but the author has not
-  run the tests on it yet (the CI workflow has not run at the time of writing).
+- On Windows, `run_python` is limited by a Job Object (memory cap, one process, kill on close, CPU backstop,
+  a cap on everything the script writes); there is no per-file size limit there, only that total.
+- macOS has not been run on a real Mac. In CI, `run_python` has no memory cap there (no `/proc`) and `sed` fails
+  (BSD `sed` has no `--sandbox`).
 - The model server you configure can see everything the agent sees.
 
 See "What it does not protect against" in the [README](README.md) for the full list.

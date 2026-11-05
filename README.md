@@ -3,7 +3,7 @@
 **Repository:** https://github.com/Dagrinder742/sandbox-tool-win
 
 The Windows line of sandbox-tool: it runs natively in PowerShell, with `run_python` (and so the DONE gate and the
-expected-output gate) limited by Windows Job Objects. It also still runs on Linux, Termux and WSL. The handover log
+expected-output gate) limited by Windows Job Objects. It also runs on Linux (tested in CI); see Platforms. The handover log
 for this line is `info_win.txt`.
 
 Let a small local model (or Gemini) work in **one folder** on your machine: read and edit files,
@@ -37,8 +37,8 @@ fails; those failures are listed, not hidden.
 Docker isn't practically available on stock Android/Termux, so this is a lightweight harness
 instead of a container. It reduces risk and makes the model's behaviour observable and logged.
 
-**It is not a security sandbox and does not guarantee safety.** It has known gaps, macOS and
-Windows are unverified or unsupported, and it should not be used for untrusted models or
+**It is not a security sandbox and does not guarantee safety.** It has known gaps, macOS is
+untested and known to miss two protections (see Platforms), and it should not be used for untrusted models or
 sensitive data without a container or VM around it. Read [SECURITY.md](SECURITY.md) and
 "What it does not protect against" below before you run it.
 
@@ -54,7 +54,8 @@ Every reply from the model is an optional one-line `NOTE:` (its memory) plus exa
 | `patch_file <path>` | `SEARCH` / `REPLACE` block. Refuses if SEARCH is missing, not unique, equals REPLACE, or would leave a `.py` file with a syntax error. Repairs indentation. |
 | `replace_def <path.py> <name>` | Replaces ONE whole function, class or `Class.method` with the complete new definition from a fenced block. The old version is found with `ast`, so the model copies no old text and counts no lines. Refuses an unknown or duplicated name, a block that is not exactly one def/class with the same name, and any result with a syntax error. Space-indented code cannot be spliced into a tab-indented file (it is refused). |
 | `check_file <path.py>` | Static check (syntax, stub bodies, shadowed methods, wrong argument counts, stdlib module used but never imported). Never runs the code. Runs automatically after every write/patch of a `.py` file. |
-| `run_python <path.py>` | Runs a script under a runtime guard (below). POSIX only. |
+| `replace_lines <path> <first> <last>` | Replaces lines `first`..`last` (the numbers `read_file` shows) with the lines in a fenced block; an empty block deletes them. Only works on lines the model has seen in the file's current state: if the file changed since it was read, or the lines were never shown, it is refused and the current numbered lines are shown instead. |
+| `run_python <path.py>` | Runs a script under a runtime guard (below): POSIX limits on Linux/Termux, a Windows Job Object on Windows. |
 
 Things the tool does so a small model keeps on track:
 
@@ -151,8 +152,10 @@ version against the live API.
   reads, writes, deletes, listings, renames, chmod/links, starting programs, network and `ctypes` outside the
   sandbox are blocked at run time. Obfuscation (base64, `getattr`, `e = exec`) does not help a script because the
   hook looks at actions, not code. A static pre-scan only gives friendlier messages.
-* Limits: 10 s wall clock (`RUN_TIMEOUT_S`), CPU and file-size limits, and a memory watchdog (`RUN_MEM_MB`,
-  Linux `/proc`). The child gets a clean environment: your API keys are not passed to it.
+* Limits: 10 s wall clock (`RUN_TIMEOUT_S`) everywhere. Linux/Termux: CPU and file-size limits and a memory
+  watchdog (`RUN_MEM_MB`, read from `/proc`). Windows: a Job Object with a memory cap (`RUN_MEM_MB`, committed
+  memory), one process only, kill on close and a CPU backstop, plus a cap on everything the script writes
+  (`RUN_MAX_WRITE_MB`). The child gets a clean environment: your API keys are not passed to it.
 * This tool's own file and the refusal log are in a `PROTECTED` set that no tool or script can modify.
 * The sandbox folder may not be `/` or your home folder (or a parent of it).
 
@@ -160,7 +163,9 @@ version against the live API.
 
 * It is not a container or VM. A determined attacker using interpreter internals could get out. Known gaps:
   `os.mkfifo`, `os.mknod` and `os.chroot` raise no audit event.
-* `run_python` needs POSIX limits and is switched off on Windows. macOS is untested.
+* macOS (seen in CI, not on a real Mac): `run_python` has no memory cap there (no `/proc`), so only the time
+  limit stops a script; and `sed` fails, because BSD `sed` has no `--sandbox` option (the tool never runs `sed`
+  without it).
 * The model server you configure can see everything the agent sees. The agent's code has no network, but the
   tool itself calls your model endpoint.
 * Anything the model writes *inside the sandbox* is the model's output: read it before you run it yourself.
@@ -196,11 +201,11 @@ Report escapes privately (see `SECURITY.md`).
 
 | Where | State |
 |---|---|
-| Linux, Termux (Android) | Developed and tested. Everything works. |
-| WSL (Ubuntu) | A normal Linux userland, so it should behave like Linux. Run `--selfcheck` to confirm on your machine. |
-| Windows PowerShell with Windows Python | `--selfcheck` on Windows 11 / Python 3.14 passed text encoding, CRLF handling and the sandbox boundary (including `..\\`, absolute and symlink paths) and found Git for Windows' tools in `usr\\bin`. It also found that programs could not be started; that is fixed (the tool now starts them by full path) but **not yet re-checked on Windows**. `run_python` is switched off by design (its CPU and memory limits need POSIX), so use WSL or Termux for it. The test suites have not been run on Windows. |
-| Git Bash with Windows Python | **Untested**, expected to behave like PowerShell. |
-| macOS | Untested. BSD `sed` has no `--sandbox` option, so `sed` is expected to fail there; the other tools should work. |
+| Windows 11, PowerShell, Windows Python | Developed and tested here (Python 3.14). `--selfcheck`: 25 ok. Both test suites pass, also in CI. `run_python` works under a Windows Job Object. |
+| Linux | Both test suites pass in CI on Python 3.10, 3.11, 3.12 and 3.13. |
+| Termux (Android), WSL (Ubuntu) | The tool was first built on Termux, and the Linux line is tested there; this Windows repository has not been run on Termux or WSL yet. Run `--selfcheck` to confirm on your machine. |
+| Git Bash with Windows Python | Untested, expected to behave like PowerShell. |
+| macOS | Not run on a real Mac. In CI, 4 checks fail: `sed` (BSD `sed` has no `--sandbox`) and the memory limit for `run_python` (no `/proc`). The rest passes. |
 
 Run `python src/sandbox_tool.py --selfcheck` (or `sandbox-tool --selfcheck`) on a machine to see what works on **that**
 machine: text encoding, line endings, the sandbox boundary, which programs exist, and `run_python`. It runs in a
@@ -225,8 +230,8 @@ pytest                              # runs both
 ```
 
 Any change to `src/sandbox_tool.py` must keep the first suite green; a change that makes it fail has weakened the guard.
-Where `run_python` is off (Windows by design, or `RUN_PYTHON=0`) the 61 checks that need it are skipped and counted, listed by name in `tests/needs_run_python.txt`; every other check still has to pass. With `run_python` on, nothing is skipped.
-Developed and tested on Linux (Python 3.11 to 3.13) and Termux. The included GitHub Actions workflow lists Python 3.10 to 3.13 and macOS, but it has not run yet, so those are untested.
+Where `run_python` is off (`RUN_PYTHON=0`, or a system with neither POSIX limits nor Windows Job Objects) the checks that need it are skipped and counted, listed by name in `tests/needs_run_python.txt`; every other check still has to pass. With `run_python` on, nothing is skipped.
+GitHub Actions runs both suites on every push: Linux with Python 3.10, 3.11, 3.12 and 3.13, and Windows, all passing; macOS fails 4 checks (the two gaps above) and is marked allowed-to-fail.
 
 ## Benchmark kit
 
@@ -234,8 +239,13 @@ Developed and tested on Linux (Python 3.11 to 3.13) and Termux. The included Git
 says. It records every run, writes one report, lets you add notes, compares sessions and can export verified
 runs. See [`bench/README.md`](bench/README.md).
 
-Informal results from the author's own runs (one model, a handful of tasks, 10 runs per batch, so read these
-as hints, not measurements): the same 3B model on one coding task passed 7/10 runs, then 10/10 after one line
+Recent results on Windows (Qwen2.5-Coder-3B-Instruct, CPU only, 10 runs per batch, so read these as hints,
+not measurements): `skill_v4` (write a class to a contract) passes 10/10 with 0 false-DONE. `pipeline_omni_v2`
+(fix two bugs across three files) passes 0/10: the best runs fix the filter and print exactly the expected output,
+but put the price conversion where the crash shows up instead of where the task says it belongs. Every report
+records the tool and prompt hashes, and results are only compared when those match.
+
+Earlier results from the author's runs on the Linux line: the same 3B model on one coding task passed 7/10 runs, then 10/10 after one line
 was added to the system prompt and the tool started flagging a forgotten `import`. A harder rewrite of the
 task dropped to 0/10 and came back to 9/10 once the task text spelled out its logic.
 

@@ -41,6 +41,7 @@ import ast
 import builtins
 import glob
 import io
+import hashlib
 import json
 import re
 import tokenize
@@ -56,7 +57,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-__version__ = "0.1.0+win.8"
+__version__ = "0.1.0+win.9"
 
 
 def _default_sandbox() -> Path:
@@ -1101,6 +1102,30 @@ def log_to_index(filename: str, action: str):
         pass
 
 
+# W9: which numbered lines the model has seen, per file, and in which state of the file. replace_lines uses
+# line numbers, which go stale after any edit that adds or removes lines; it only runs on lines seen in the
+# file's CURRENT state. None = not tracking (one command typed by hand: the human sees the file).
+_VIEWS = None
+
+
+def _view_key(path_str: str) -> str:
+    return os.path.normcase(os.path.normpath(path_str))
+
+
+def _content_sig(text: str) -> str:
+    return hashlib.sha256("\n".join(text.splitlines()).encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _record_view(path_str: str, text: str, shown) -> None:
+    """read_file showed these line numbers of this content: remember them (same content adds lines)."""
+    if _VIEWS is None:
+        return
+    key, sig = _view_key(path_str), _content_sig(text)
+    old = _VIEWS.get(key)
+    lines = set(shown) | (old[1] if old and old[0] == sig else set())
+    _VIEWS[key] = (sig, lines)
+
+
 def cmd_read_file(path_str: str, start: int = 1, count: int = 40) -> str:
     # 40 lines keeps prompt evaluation fast on ARM CPU
     """Safe built-in tool to read a file with line numbers and optional range slicing."""
@@ -1127,6 +1152,7 @@ def cmd_read_file(path_str: str, start: int = 1, count: int = 40) -> str:
             shown.append(row)
             used += len(row) + 1
         end_idx = start_idx + len(shown)
+        _record_view(path_str, "\n".join(lines), range(start_idx + 1, end_idx + 1))
 
         header = f"[file: {path_str} | lines {start_idx + 1}-{end_idx} of {total_lines}]"
         note = ""
@@ -1283,6 +1309,91 @@ def cmd_patch_file(path_str: str, search_text: str, replace_text: str) -> str:
         return f"ERROR: {e}"
 
 
+def _around(first: int, last: int, total: int):
+    """(start, count) for read_file: lines first..last with 3 lines of context, at most 40 lines."""
+    start = max(1, first - 3)
+    return start, max(1, min(40, min(total, last + 3) - start + 1))
+
+
+def cmd_replace_lines(path_str: str, first: int, last: int, new_text: str) -> str:
+    """W9: replace lines first..last (the numbers read_file shows, inclusive) with new_text. An empty new_text
+    deletes them. Only runs on lines the model has seen in the file's current state (see _VIEWS)."""
+    try:
+        _check_writable(path_str)
+        target = SANDBOX / path_str
+        if not target.is_file():
+            return f"REFUSED: file does not exist: {path_str}"
+        content = _read_text(target)
+        crlf = _uses_crlf(target)
+        lines = content.split("\n")
+        trail = content.endswith("\n")
+        if trail:
+            lines = lines[:-1]
+        total = len(lines)
+        if not (1 <= first <= last <= total):
+            s, c = _around(min(max(first, 1), total), min(max(last, 1), total), total) if total else (1, 1)
+            return (f"REFUSED: {path_str} has {total} lines, so lines {first}-{last} do not exist (the first number "
+                    f"must be 1 or more and not larger than the second). Its lines are below:\n"
+                    + cmd_read_file(path_str, s, c))
+        if _VIEWS is not None:
+            v = _VIEWS.get(_view_key(path_str))
+            if v is None or v[0] != _content_sig(content):
+                why = ("you have not read it with read_file yet" if v is None else
+                       "it has changed since you last read it, so its line numbers have moved")
+            else:
+                missing = [n for n in range(first, last + 1) if n not in v[1]]
+                why = f"you have not seen line {missing[0]} of it yet" if missing else ""
+            if why:
+                s, c = _around(first, last, total)
+                return (f"REFUSED: replace_lines on {path_str} was NOT applied: {why}, and line numbers are only "
+                        f"safe on lines you have seen. Its current lines are below. Send replace_lines again in your "
+                        f"next reply, with these numbers:\n" + cmd_read_file(path_str, s, c))
+        new = new_text[:-1] if new_text.endswith("\n") else new_text
+        note = ""
+        g = _strip_gutter(new)
+        if g is not None:
+            new, note = g, (" (the line numbers copied from read_file, like '  10 | ', were removed: write only the "
+                            "code)")
+        new_lines = new.split("\n") if new != "" else []
+        old_ws = lines[first - 1][:_indent(lines[first - 1])]
+        body = [l for l in new_lines if l.strip()]
+        if body and old_ws and min(_indent(l) for l in body) == 0:
+            new_lines = [old_ws + l if l.strip() else l for l in new_lines]
+            note += " (indentation of the new lines adjusted to match the file)"
+        if new_lines == lines[first - 1:last]:
+            return ("REFUSED: those lines already have exactly that text, so nothing would change. Write the "
+                    "corrected lines in the ``` block")
+        out = lines[:first - 1] + new_lines + lines[last:]
+        new_content = "\n".join(out) + ("\n" if trail and out else "")
+        if path_str.endswith(".py"):
+            try:
+                ast.parse(content)
+            except SyntaxError:
+                pass  # already broken: let the model repair it step by step
+            else:
+                try:
+                    ast.parse(new_content)
+                except SyntaxError as e:
+                    bad = (e.text or "").strip()
+                    return (f"REFUSED: this edit would leave {path_str} with a syntax error (line {e.lineno}: "
+                            f"{e.msg}{'  -> ' + bad if bad else ''}), so it was NOT applied and the file is "
+                            f"unchanged. Keep the brackets, quotes and indentation balanced.")
+        _write_text(target, new_content, crlf)
+        log_to_index(path_str, "patched")
+        n_new = len(new_lines)
+        s, c = _around(first, first + max(n_new, 1) - 1, max(len(out), 1))
+        view = cmd_read_file(path_str, s, c) if out else f"[{path_str} is now empty]"
+        what = (f"deleted lines {first}-{last} of {path_str}" if not new_lines else
+                f"replaced lines {first}-{last} of {path_str} with {n_new} line{'s' if n_new != 1 else ''}")
+        moved = "" if n_new == last - first + 1 else " Line numbers below this edit have changed."
+        return (f"[exit 0]\nSuccessfully {what}{note}.{moved} The file now reads, around your edit:\n"
+                f"{view}")
+    except Refused as e:
+        return f"REFUSED: {e}"
+    except Exception as e:
+        return f"ERROR: {e}"
+
+
 def _find_def(tree, dotted: str):
     """The AST node for 'func', 'Class' or 'Class.method' (nesting allowed), else Refused."""
     scope, node, parts = tree, None, dotted.split(".")
@@ -1388,7 +1499,7 @@ def validate(argv: list[str]) -> list[str]:
         raise Refused("empty command")
     cmd, args = argv[0], argv[1:]
     if cmd not in POLICY:
-        raise Refused(f"command not allowed: {cmd} (allowed: {', '.join(POLICY)}, read_file, write_file, patch_file, replace_def, check_file, run_python)")
+        raise Refused(f"command not allowed: {cmd} (allowed: {', '.join(POLICY)}, read_file, write_file, patch_file, replace_def, replace_lines, check_file, run_python)")
     pol = POLICY[cmd]
     for a in args:
         if a in SHELL_TOKENS:
@@ -1549,6 +1660,18 @@ def _run(command: str, body: str = "") -> str:
                 return ("REFUSED: no code received. The ``` block holding the whole new function must come on the "
                         "lines AFTER the CMD line")
             return _with_check(cmd_replace_def(parts[1], parts[2], block), parts[1])
+        elif cmd == "replace_lines":
+            usage = ("REFUSED: usage: replace_lines <path> <first> <last>   (the line numbers read_file shows), then "
+                     "the new lines in a ``` block on the lines after the CMD line")
+            if len(parts) not in (3, 4) or not all(p.isdigit() for p in parts[2:]):
+                return usage
+            first = int(parts[2])
+            last = int(parts[3]) if len(parts) == 4 else first
+            block = _fenced_block(body)
+            if block is None:
+                return ("REFUSED: no new lines received. The ``` block holding the new lines must come on the lines "
+                        "AFTER the CMD line (an empty ``` block deletes the lines)")
+            return _with_check(cmd_replace_lines(parts[1], first, last, block), parts[1])
         elif cmd == "patch_file":
             if len(parts) < 2:
                 return "REFUSED: patch_file requires <path>"
@@ -1615,6 +1738,9 @@ Commands (paths are relative to the sandbox root, no pipes or redirects):
 - replace_def <path.py> <name>   replaces ONE whole function (or class, or Class.method) with the
   new version you write. Put the COMPLETE new definition in a ``` block after the CMD line. The
   old version is removed for you: no SEARCH text and no line numbers. Use it to fix a function.
+- replace_lines <path> <first> <last>   replaces lines first to last (the numbers read_file
+  showed you) with the lines in a ``` block after the CMD line. Write only the code, never the
+  '  10 | ' numbers. Use it to change one or a few lines you have just read.
 - check_file <path.py>   static check (syntax, stub bodies, shadowed methods, wrong
   argument counts). It never runs the code. It also runs automatically after every
   write_file/patch_file/replace_def of a .py file: if it lists problems, fix them
@@ -1629,12 +1755,12 @@ function) or patch_file (a few lines) and run_python again. Only say the code wo
 matches the task. If it still fails, say so and quote the error.
 
 FILES: never create or edit files with cat, echo, printf, heredocs, redirects, python -c,
-base64 or any other trick. Those are refused. Only write_file, patch_file and replace_def write files, and
+base64 or any other trick. Those are refused. Only write_file, patch_file, replace_def and replace_lines write files, and
 only run_python runs code.
 
 RULE OF OBSERVATION: you cannot know your code works until run_python has run it and you
 have read the output. Never declare success, and never patch, on a guess. After any
-write_file, patch_file or replace_def of a .py file, run_python it before you reply DONE.
+write_file, patch_file, replace_def or replace_lines of a .py file, run_python it before you reply DONE.
 
 When you see a NameError for a standard library module, always place the import statement
 at the very top of the file (module scope), not inline.
@@ -1670,6 +1796,12 @@ CMD: replace_def hello.py greet
 ```python
 def greet(name):
     return "hello " + name
+```
+
+Example replace_lines (read_file showed "   1 | print("hi\\n")"; this replaces line 1):
+CMD: replace_lines hello.py 1 1
+```python
+print("hello\\n")
 ```
 
 If a file is longer than what you read, say which lines you reviewed and make no
@@ -1914,8 +2046,8 @@ def ping() -> str:
             "and the -t (threads) / -np (slots) server flags.")
 
 
-BLOCK_CMDS = ("write_file", "patch_file", "replace_def")
-EDIT_CMDS = ("patch_file", "replace_def")   # change part of an existing file
+BLOCK_CMDS = ("write_file", "patch_file", "replace_def", "replace_lines")
+EDIT_CMDS = ("patch_file", "replace_def", "replace_lines")   # change part of an existing file
 
 
 def parse_reply(reply: str):
@@ -2172,6 +2304,8 @@ def agent(task: str, max_steps: int = 10) -> str:
         result = _agent_loop(task, max_steps, msgs)
         return result
     finally:
+        global _VIEWS
+        _VIEWS = None    # W9: view tracking only inside an agent run (a command typed by hand is not tracked)
         _dump_transcript(task, result, msgs)
 
 
@@ -2180,10 +2314,13 @@ def agent(task: str, max_steps: int = 10) -> str:
 # AFTER the >>>>>>> REPLACE line": there the intended code was NOT applied.
 _NOOP_REFUSALS = ("REFUSED: this exact edit was already applied",
                   "REFUSED: that is the same code the file already has",
-                  "REFUSED: SEARCH and REPLACE are identical, so nothing would change")
+                  "REFUSED: SEARCH and REPLACE are identical, so nothing would change",
+                  "REFUSED: those lines already have exactly that text")
 
 
 def _agent_loop(task: str, max_steps: int, msgs: list) -> str:
+    global _VIEWS
+    _VIEWS = {}          # W9: numbered lines the model has seen (replace_lines only edits those)
     consecutive_failures = 0
     last_key = None
     done_ok = set()      # write/patch commands that already succeeded
@@ -2270,6 +2407,7 @@ def _agent_loop(task: str, max_steps: int, msgs: list) -> str:
         if not segs:                      # safety net: parse_reply found a command that the splitter did not
             segs = [(text, body, "")]
         outs, last_nudge = [], ""
+        reply_views = set()   # W9: files shown or changed earlier in THIS reply (the model wrote its numbers before)
         for n_run, (cmd, body, raw) in enumerate(segs[:MAX_BATCH]):
             if n_run:                     # a further command from the same reply: history shows it as sent
                 msgs[-1] = ("assistant", msgs[-1][1] + "\n" + raw)
@@ -2303,6 +2441,11 @@ def _agent_loop(task: str, max_steps: int, msgs: list) -> str:
                 result = (f"REFUSED: you have not looked at {target} yet, so this edit was a guess about what is "
                           f"in it and was NOT applied. The file's real content is below. Send ONE edit again, "
                           f"based on these lines:\n{shown}")
+            elif name == "replace_lines" and target in reply_views:
+                result = (f"REFUSED: replace_lines on {target} was NOT applied: an earlier command in this same "
+                          f"reply showed or changed {target}, so you wrote these line numbers before seeing its "
+                          f"current lines. Send replace_lines again in your next reply, using the numbers shown "
+                          f"in the output above.")
             elif (REQUIRE_RUN_BEFORE_PATCH and RUN_PYTHON and name in EDIT_CMDS and is_py
                     and target in unverified and target not in problems):
                 result = (f"REFUSED: run_python {target} first and read what it prints, then patch it. "
@@ -2320,6 +2463,8 @@ def _agent_loop(task: str, max_steps: int, msgs: list) -> str:
                 ran_any = True
 
             ok = result.startswith("[exit 0]")
+            if target and (pre or name == "read_file" or (is_block and ok) or (name == "replace_lines")):
+                reply_views.add(target)   # shown or changed now: numbers written later in this reply are stale
             if not result.startswith(("REFUSED:", "ERROR:")):  # the model has now really seen (or made) these files
                 if is_block and ok and target:
                     seen_files.add(target)

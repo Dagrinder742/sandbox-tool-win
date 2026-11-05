@@ -82,3 +82,5 @@ expect DONE after a clean run that printed orders=4 is REFUSED, naming each wron
 expect the tool's run of main.py after run_python calc.py is the output the gate checks (expected lines -> DONE accepted)
 expect DONE when nothing was run (only read_file): refused, the output cannot be checked
 expect a run that prints too few lines: the missing line is named
+# W9: the DONE gate after replace_lines needs run_python, like the patch_file one
+rlines DONE right after replace_lines on a .py file is refused until it is run (DONE gate)

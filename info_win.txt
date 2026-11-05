@@ -362,4 +362,88 @@ NEXT (Casey): apply W8, run both suites (ALL OK twice), commit + push, then:
    python bench\bench.py run -t pipeline_omni_v2 -n 10 --label win-W8-omni2
  and check that both reports show system_sha 105cbe1186.
 
+W8 RESULT 1 of 2 (2026-11-05, Casey, PowerShell, --live): report 20261105-1203-win-w8-skill4, tool_sha 4c84b6c25a,
+ system_sha 105cbe1186 (no Stock example), skill_v4 prompt a5381575d0, verifier 6f127c04a7. 10/10 PASS (10/10 checks
+ each), 0 false-DONE, all "done". 3.5 steps / 222 s per run (W7 baseline with the example: 3.1 / 210), 2 refusals
+ (W7: 1). Prompt 1271 tokens (W7: 1505).
+ THE COST: none on the pass rate. The state dict, scoring and prints all come from the task contract, not from the
+ example. One pattern to watch: 4 of 10 runs (4, 6, 8, 10) wrote "CMD: DONE: ..." in the same reply as write_file
+ (W7: 1 of 10, run 10). The tool ignores a DONE in a reply that ran commands, so it cost only steps: runs 6 and 8
+ were refused once by the DONE gate, runs 6 and 10 sent a bare "DONE" first. n=10, so 4 vs 1 may be noise.
+ Also seen: NOTE lines now often name invented paths ("read_file /home/sandbox/skill.py", "/sandbox/skill.py"); only
+ the NOTE, the commands used the right relative path. Harmless today.
+
+W8 RESULT 2 of 2 (2026-11-05, Casey, --live): report 20261105-1254-win-w8-omni2, tool_sha 4c84b6c25a, system_sha
+ 105cbe1186, pipeline_omni_v2 prompt 08814efaef, verifier 48489e5b3b. Baseline win-W6-omni2 (old prompt; W7's
+ line-number strip is also in this build).
+            W6 (with Stock)   W8 (without)
+ PASS       0/10              0/10
+ 12/13      0                 4 (runs 2, 3, 5, 8)
+ false-DONE 0                 4 (the same 4 runs)
+ ended      5 step / 4 abort / 1 blocked     4 done / 3 step / 3 abort
+ steps, s   12.7, 654 s       11.2, 548 s
+ refusals   45                27
+ Stock leak 5 runs            0 runs (no load() / state["items"] / bolts anywhere in the report)
+WHAT HAPPENED: the leak is gone and the model got much further. clean()'s filter was fixed in ingest.py in 6 of 10
+ runs (failed only in 1, 4, 6, 9), and runs 2, 3, 5, 8 printed exactly the two expected lines, so the expected-output
+ gate let DONE through: the first runs ever to finish this task with the right output.
+WHY ALL 10 STILL FAIL: every run put the price cast in calc.py (float(row["price"]) in subtotal), where the
+ TypeError traceback points, and none in ingest.py, although the task says "clean() must convert the price of every
+ row it keeps to a float". The program's output is the same either way, so the expected-output gate cannot see it;
+ only the verifier's "clean() returns price as a float" check does. These 4 false-DONEs are therefore "right output,
+ fix in the wrong place (symptom, not root cause)", not invented success. The same pattern as group B since W3.
+VERDICT: W8 kept (no cost on skill_v4, clear gain here). Open: steering the cast to ingest.py. Not designed yet; it is
+ the root-cause problem the task was built to test, so any help must stay general (not "put the cast in ingest.py").
+
+PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
+ --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the
+ tool; display only, the model always gets the full output, so nothing is comparable-breaking). Side effect: the
+ bench report is built from the same output, so reports from then on are longer: DECIDED (option a), full reports
+ are fine and give Claude slightly more to analyse. A report-only trim (keep 15 lines per tool output in the report)
+ was started and dropped unbuilt at Casey's choice; no code changed.
+
+W9 (2026-11-05) FROM CLAUDE: NEW COMMAND replace_lines <path> <first> <last> (edit by the numbers read_file shows).
+APPLY ONLY AFTER BOTH W8 CAMPAIGNS HAVE FINISHED (W9 contains W8; applying it early mixes the two changes).
+Casey's choice (option 2 of the free architecture ideas, ahead of best-of-N): "approaching the next update on number 2".
+WHY: SEARCH text that does not match exactly is the most common failed edit (win-W6-omni2 run 10 x7, run 3; earlier
+ bugfix runs). read_file already shows numbered lines, and a 3B model handles "line 10" better than copying text.
+CHANGE (sandbox_tool.py):
+ - replace_lines <path> <first> <last> (or one number = one line), then a ``` block with the new lines; an empty block
+   deletes them. Lines are inclusive, counted like read_file. Uses W7's line-number strip on the new lines; a block
+   written with no indentation gets the first old line's indentation (and says so); the .py syntax guard as in
+   patch_file; CRLF files stay CRLF; "those lines already have exactly that text" is a no-op (in _NOOP_REFUSALS).
+ - STALE NUMBERS ARE REFUSED (the main risk of line numbers): inside an agent run the tool remembers which numbered
+   lines read_file showed, and for which content of the file (_VIEWS: sha256 of the text). replace_lines runs only
+   if the file is unchanged since then AND every line in the range was shown. Otherwise "NOT applied: it has changed
+   since you last read it / you have not seen line N of it yet", with the current numbered lines around the range.
+   Numbers written in the same reply as a read_file of that file, or after another edit of it in the same reply, are
+   refused too (the model wrote them before seeing the output). An unread file goes through the existing "you have
+   not looked at it yet" path (replace_lines is in EDIT_CMDS, like patch_file).
+ - After a successful edit the tool shows the new numbered lines around it (and "Line numbers below this edit have
+   changed" when the count changed), so the next edit can use them in the next reply.
+ - A command typed by hand is not tracked (_VIEWS is None outside an agent run; reset in agent()'s finally).
+ - SYSTEM: one command-list entry (3 lines) and one example; the two lists of file-writing commands name it.
+   Nothing else changed; patch_file and replace_def are unchanged. Version 0.1.0+win.9.
+HASHES: system_sha 1ce60c3cc5 (W8 105cbe1186; 4452 characters, W8 4007), tool_sha fbc0744144; task prompts and
+ verifiers unchanged.
+TESTS (Linux): main suite 528 checks ALL OK (+23 "rlines": the run-10 fix as replace_lines after read_file; an unread
+ file is refused and the same edit then applies; read_file + replace_lines in one reply refused; unseen lines
+ refused; a changed file refused with the new view and the new numbers then work; a second edit builds on the
+ numbers shown after the first; two edits of one file in one reply (the second refused); the DONE gate after it; a
+ no-op not counted as unapplied; tracking off after a run; hand mode: reindent, copied numbers removed, syntax guard,
+ past the end, 3 usage errors, no block, one number, one line to two, empty block deletes, CRLF kept, outside the
+ sandbox / missing file; the prompt and the allowed-commands message name it). The DONE-gate check is added to
+ tests/needs_run_python.txt. Python 3.10-3.13 ALL OK (both suites); cp1252 ALL OK; RUN_PYTHON=0 ALL OK; bench
+ selftest ALL VERIFIERS BEHAVE; pytest 2 passed; --selfcheck 26 ok. Broke 10 rules on separate scratch copies, all
+ caught: no stale-file check (1 FAIL), no same-reply check (2), no unseen-line check (1), tracking not reset (3), no
+ reindent (1), no syntax guard (1; the first attempt at this break did not disable it and is not counted), no-op not
+ in the no-op list (1), CRLF not kept (1), not an edit command (1), read_file records no view (8).
+HOW TO MEASURE (after W8's results are in, and against them, same system_sha rules: W9 is a new prompt):
+ python bench\bench.py run -t pipeline_omni_v2 -n 10 --label win-W9-omni2   (the gain: edits to ingest.py)
+ python bench\bench.py run -t skill_v4 -n 10 --label win-W9-skill4          (no regression on a writing task)
+ Look at: PASS, how often replace_lines is used ("commands used"), how often it is refused and why (stale / unseen /
+ same reply), and whether "search text not found" goes down.
+UNVERIFIED: whether the 3B model uses it at all, and whether the stale-number refusals cost more steps than they
+ save (the 14-step limit of pipeline_omni_v2 stays as it is).
+
 # The current source is src/sandbox_tool.py in this repo's zip (not copied here, to keep this file short).

@@ -763,6 +763,96 @@ ans, out, _ = play([W("g4.py", "print(1/0)"), "CMD: run_python g4.py", P("g4.py"
                     "CMD: run_python g4.py", "DONE: fixed, prints 1"])
 check(ans == "fixed, prints 1", "gate", "write, run, patch, run, DONE is accepted", ans[:60])
 
+# ---- W9: replace_lines <path> <first> <last> (edits by the numbers read_file shows) ----
+def RL(name, a, b, code): return f"CMD: replace_lines {name} {a} {b}\n```python\n{code}\n```"
+_FIX10 = '            if row.get("item") and row.get("qty", 0) > 0:'
+def _last(seen, k): return seen[k][-1][1] if len(seen) > k else ""
+(SB / "rl.py").write_text(_ING)
+ans, out, seen = play(["CMD: read_file rl.py", RL("rl.py", 10, 10, _FIX10), "CMD: run_python rl.py", "DONE: x"])
+_t = (SB / "rl.py").read_text(); _m = _last(seen, 2)
+check(_t == _ING.replace('qty", 0) >= 0', 'qty", 0) > 0') and "Successfully replaced lines 10-10 of rl.py with 1 line" in _m
+      and "  10 |             if row.get(\"item\") and row.get(\"qty\", 0) > 0:" in _m, "rlines",
+      "the run-10 fix as replace_lines after read_file: applied, and the new numbered lines are shown", _m[:200])
+(SB / "rl.py").write_text(_ING)
+ans, out, seen = play([RL("rl.py", 10, 10, _FIX10), RL("rl.py", 10, 10, _FIX10), "DONE: x"])
+_m1, _m2 = _last(seen, 1), _last(seen, 2)
+check("you have not looked at rl.py yet" in _m1 and "  10 |" in _m1 and "Successfully replaced lines 10-10" in _m2
+      and 'qty", 0) > 0' in (SB / "rl.py").read_text(), "rlines",
+      "replace_lines on an unread file: refused and the file shown; the same edit in the next reply applies", _m1[:120])
+(SB / "rl.py").write_text(_ING)
+ans, out, seen = play(["CMD: read_file rl.py\n" + RL("rl.py", 10, 10, _FIX10), "DONE: x"])
+_m = _last(seen, 1)
+check("an earlier command in this same reply showed or changed rl.py" in _m and 'qty", 0) >= 0' in (SB / "rl.py").read_text(),
+      "rlines", "read_file and replace_lines in ONE reply: the numbers were written before the output was seen -> refused", _m[-200:])
+(SB / "rl.py").write_text(_ING)
+ans, out, seen = play(["CMD: read_file rl.py 1 5", RL("rl.py", 10, 10, _FIX10), "DONE: x"])
+_m = _last(seen, 2)
+check("you have not seen line 10 of it yet" in _m and "  10 |" in _m and 'qty", 0) >= 0' in (SB / "rl.py").read_text(), "rlines",
+      "replace_lines on lines read_file never showed (read 1-5, edit 10): refused, lines 7-13 shown", _m[:160])
+(SB / "rl.txt").write_text("a\nb\nc\nd\n")
+ans, out, seen = play(["CMD: read_file rl.txt", P("rl.txt", "a", "a\nNEW"), RL("rl.txt", 3, 3, "C"), RL("rl.txt", 4, 4, "C"), "DONE: x"])
+_m3, _m4 = _last(seen, 3), _last(seen, 4)
+check("it has changed since you last read it, so its line numbers have moved" in _m3 and "   4 | c" in _m3
+      and (SB / "rl.txt").read_text() == "a\nNEW\nb\nC\nd\n", "rlines",
+      "file changed after read_file (a patch added a line): old numbers refused with the new view; the new numbers work", _m3[:160])
+(SB / "rl.txt").write_text("a\nb\nc\nd\n")
+ans, out, seen = play(["CMD: read_file rl.txt", RL("rl.txt", 1, 1, "A\nA2"), RL("rl.txt", 4, 4, "C"), "DONE: x"])
+check((SB / "rl.txt").read_text() == "a\nb\nc\nd\n".replace("a\n", "A\nA2\n").replace("c\n", "C\n")
+      and "Line numbers below this edit have changed" in _last(seen, 2), "rlines",
+      "a second replace_lines builds on the numbers shown after the first (1 line became 2)", repr((SB / "rl.txt").read_text()))
+(SB / "rl.txt").write_text("a\nb\nc\nd\n")
+ans, out, seen = play(["CMD: read_file rl.txt", RL("rl.txt", 1, 1, "A") + "\n" + RL("rl.txt", 4, 4, "D"), "DONE: x"])
+check((SB / "rl.txt").read_text() == "A\nb\nc\nd\n" and "an earlier command in this same reply" in _last(seen, 2), "rlines",
+      "two replace_lines on one file in ONE reply: the first applies, the second (stale numbers) is refused")
+(SB / "rl.py").write_text(_ING)
+ans, out, seen = play(["CMD: read_file rl.py", RL("rl.py", 10, 10, _FIX10), "DONE: fixed"])
+check("have not run it since" in _last(seen, 3) or "have not run it since" in out, "rlines",
+      "DONE right after replace_lines on a .py file is refused until it is run (DONE gate)")
+(SB / "rl.py").write_text(_ING)
+ans, out, seen = play(["CMD: read_file rl.py", RL("rl.py", 10, 10, '            if row.get("item") and row.get("qty", 0) >= 0:'),
+                       "CMD: run_python rl.py", "DONE: nothing to change"])
+check("those lines already have exactly that text" in _last(seen, 2) and ans == "nothing to change", "rlines",
+      "a no-op replace_lines is refused but not counted as an unapplied edit (DONE accepted after a clean run)", ans[:60])
+check(T._VIEWS is None, "rlines", "view tracking is off again after an agent run (hand-typed commands are not tracked)")
+for _n in ("rl.py", "rl.txt"):
+    (SB / _n).unlink(missing_ok=True)
+# hand mode (no tracking): the command itself
+(SB / "rh.py").write_text("def f():\n    x = 1\n    return x\n")
+_r = T.run("replace_lines rh.py 2 2", "```python\nx = 2\n```")
+check(_r.startswith("[exit 0]") and (SB / "rh.py").read_text() == "def f():\n    x = 2\n    return x\n" and "indentation" in _r,
+      "rlines", "hand mode: a line written without indentation gets the old line's indentation, and says so", _r[:120])
+_r = T.run("replace_lines rh.py 2 2", "```python\n   2 |     x = 3\n```")
+check(_r.startswith("[exit 0]") and "    x = 3\n" in (SB / "rh.py").read_text() and "line numbers copied" in _r, "rlines",
+      "copied '   2 | ' numbers in the new lines are removed (W7 helper)")
+_r = T.run("replace_lines rh.py 2 2", "```python\n    x = (\n```")
+check(_r.startswith("REFUSED") and "syntax error" in _r and "    x = 3\n" in (SB / "rh.py").read_text(), "rlines",
+      "an edit that breaks the syntax is refused and the file unchanged", _r[:100])
+_r = T.run("replace_lines rh.py 3 9", "```python\nreturn 0\n```")
+check(_r.startswith("REFUSED") and "has 3 lines" in _r and "   1 | def f():" in _r, "rlines",
+      "lines past the end: refused, with the file's real lines", _r[:120])
+for _c, _why in (("replace_lines rh.py", "no numbers"), ("replace_lines rh.py x 2", "not a number"),
+                 ("replace_lines rh.py 1 2 3", "too many numbers")):
+    check(T.run(_c, "```python\npass\n```").startswith("REFUSED: usage: replace_lines"), "rlines", f"usage error: {_why}")
+check("no new lines received" in T.run("replace_lines rh.py 2 2", ""), "rlines", "no ``` block: refused with where it goes")
+_r = T.run("replace_lines rh.py 2", "```python\n    y = 0\n    x = y\n```")
+check(_r.startswith("[exit 0]") and (SB / "rh.py").read_text() == "def f():\n    y = 0\n    x = y\n    return x\n"
+      and "with 2 lines" in _r, "rlines", "one number = one line; one line can become two", _r[:100])
+(SB / "rh.txt").write_text("a\nb\nc\n")
+_r = T.run("replace_lines rh.txt 2 2", "```\n```")
+check(_r.startswith("[exit 0]") and (SB / "rh.txt").read_text() == "a\nc\n" and "deleted lines 2-2" in _r, "rlines",
+      "an empty ``` block deletes the lines", _r[:100])
+(SB / "rh.txt").write_bytes(b"a\r\nb\r\nc\r\n")
+_r = T.run("replace_lines rh.txt 2 2", "```\nB\n```")
+check(_r.startswith("[exit 0]") and (SB / "rh.txt").read_bytes() == b"a\r\nB\r\nc\r\n", "rlines", "a CRLF file stays CRLF",
+      repr((SB / "rh.txt").read_bytes()))
+check(T.run("replace_lines ../x.txt 1 1", "```\nx\n```").startswith("REFUSED") and
+      T.run("replace_lines nope.txt 1 1", "```\nx\n```").startswith("REFUSED: file does not exist"), "rlines",
+      "outside the sandbox / missing file: refused")
+check("replace_lines <path> <first> <last>" in T.SYSTEM and "Example replace_lines" in T.SYSTEM
+      and "replace_lines" in T.run("zzz"), "rlines", "the SYSTEM prompt and the allowed-commands message mention replace_lines")
+for _n in ("rh.py", "rh.txt"):
+    (SB / _n).unlink(missing_ok=True)
+
 # ---- 100-run csv_total: "CMD: DONE" was refused as a command and a correct run was aborted ----
 ans, out, seen = play([W("bd.py", "print(6.5)"), "CMD: run_python bd.py", "NOTE: it prints 6.5\nCMD: DONE"])
 check(ans == "it prints 6.5" and "command not allowed" not in out, "bareDONE", "bare CMD: DONE after a clean run ends the run with the NOTE as the answer", ans[:50])

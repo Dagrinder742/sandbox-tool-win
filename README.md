@@ -99,10 +99,11 @@ Notes:
 * On Windows, pip says "Defaulting to user installation" when the Python folder needs admin rights. That is
   fine. If `sandbox-tool` is then "not recognized", pip printed a warning naming its `Scripts` folder: add that
   folder to your PATH.
-* Termux and Ubuntu/WSL refuse a plain global `pip install` ("externally managed environment"). Use a virtual
-  environment (`python -m venv .venv`, then activate it) or `pipx install git+https://...`.
+* Termux: the plain `pip install git+https://...` works as is (`pkg install python git` first).
+* Ubuntu/WSL refuse a plain global `pip install` ("externally managed environment"). Use a virtual environment
+  (`python -m venv .venv`, then activate it) or `pipx install git+https://...`.
 * Installing gives you the command. It does not set `SANDBOX_DIR`; see the quick start below.
-* Verified on Windows 11 with Python 3.14 (both ways).
+* Verified on Windows 11 with Python 3.14 (both ways) and on Termux (Android, Python 3.13) from GitHub.
 
 ## Quick start (local model)
 
@@ -203,7 +204,8 @@ Report escapes privately (see `SECURITY.md`).
 |---|---|
 | Windows 11, PowerShell, Windows Python | Developed and tested here (Python 3.14). `--selfcheck`: 25 ok. Both test suites pass, also in CI. `run_python` works under a Windows Job Object. |
 | Linux | Both test suites pass in CI on Python 3.10, 3.11, 3.12 and 3.13. |
-| Termux (Android), WSL (Ubuntu) | The tool was first built on Termux, and the Linux line is tested there; this Windows repository has not been run on Termux or WSL yet. Run `--selfcheck` to confirm on your machine. |
+| Termux (Android) | Tested (Python 3.13, aarch64): installed from GitHub with pip, `--selfcheck` 26 ok, both test suites pass. `run_python` uses the POSIX limits there. |
+| WSL (Ubuntu) | Not run with this repository yet. A normal Linux userland, so it should behave like Linux; run `--selfcheck` to confirm. |
 | Git Bash with Windows Python | Untested, expected to behave like PowerShell. |
 | macOS | Not run on a real Mac. In CI, 4 checks fail: `sed` (BSD `sed` has no `--sandbox`) and the memory limit for `run_python` (no `/proc`). The rest passes. |
 

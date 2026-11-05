@@ -414,6 +414,14 @@ README/SECURITY ACCURACY PASS (2026-11-05, before Casey promotes the repo; docs 
  command table; current Windows results (skill_v4 10/10, pipeline_omni_v2 0/10 with why) added above the old Linux-
  line results. Intro no longer claims Termux/WSL for this repo.
 
+TERMUX VERIFIED (2026-11-05, Casey, Android aarch64, Python 3.13.13, git 2.54.0): `pip install git+https://github.com/
+ Dagrinder742/sandbox-tool-win.git` (commit 5968579) built and installed 0.1.0+win.9 with NO venv (Termux's Python is
+ not "externally managed": the README note said it was, corrected). `sandbox-tool --selfcheck` 26 ok, 0 FAIL (POSIX
+ limits + /proc memory watch). Fresh clone: tests/test_sandbox_tool.py ALL OK, bench/test_bench.py ALL OK. First run
+ of THIS repository on Android. README Platforms: Termux row "Tested"; WSL row still "not run with this repository".
+ Note: the phone's ~/OKX-Terminal/sandbox-tool is the Linux line's folder; the pip command there now runs the
+ Windows-line package (no earlier pip install was replaced).
+
 PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
  --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the
  tool; display only, the model always gets the full output, so nothing is comparable-breaking). Side effect: the

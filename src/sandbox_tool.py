@@ -56,7 +56,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-__version__ = "0.1.0+win.5"
+__version__ = "0.1.0+win.6"
 
 
 def _default_sandbox() -> Path:
@@ -2115,6 +2115,55 @@ def _out_lines(run_result: str) -> list:
     return [l.rstrip() for l in body.splitlines() if l.strip() and l.strip() != "(no output)"]
 
 
+def _and_list(items: list) -> str:
+    """'a', 'a and b', 'a, b and c'."""
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _expect_diff(got: list, expect: list) -> str:
+    """Why a run's printed lines differ from the expected lines, for the DONE refusal (W6).
+    When the first wrong line has the same number of words as the expected one, each wrong word is named: by its
+    name for 'name=value' words with the same name ('orders is 4 but must be 3'), else by position ('word 2 is ...'),
+    and the names that are already right are listed. Otherwise (missing line, other word count, one-word line) the
+    whole line is shown, as in update 25; so is a line where every word is wrong. The text always contains 'different from the expected output' (the bench
+    counts refusals by that phrase)."""
+    i = next(k for k in range(max(len(got), len(expect)) + 1)
+             if k >= len(got) or k >= len(expect) or got[k] != expect[k])
+    head = "the last run printed something different from the expected output"
+    g_words = got[i].split() if i < len(got) else []
+    e_words = expect[i].split() if i < len(expect) else []
+    if (len(g_words) >= 2 and len(g_words) == len(e_words)
+            and any(gw == ew for gw, ew in zip(g_words, e_words))):      # all words wrong: the whole line is clearer
+        wrong, right, positional = [], [], False
+        for k, (gw, ew) in enumerate(zip(g_words, e_words)):
+            gn, _, gv = gw.partition("=")
+            en, _, ev = ew.partition("=")
+            named = "=" in gw and "=" in ew and gn == en and gn != ""
+            if gw == ew:
+                if named:
+                    right.append(gn)
+                continue
+            if named:
+                wrong.append(f"{gn} is {gv or '(empty)'} but must be {ev or '(empty)'}")
+            else:
+                positional = True
+                wrong.append(f"word {k + 1} is '{gw}' but must be '{ew}'")
+        if len(wrong) > 6:
+            wrong = wrong[:6] + [f"{len(wrong) - 6} more words differ"]
+        note = ""
+        if right and not positional:
+            note = f" ({_and_list(right)} {'is' if len(right) == 1 else 'are'} already right)"
+        elif len(wrong) < len(g_words):
+            note = " (the other words are already right)"
+        which = "that value" if len(wrong) == 1 else "those values"
+        return (f"{head}. In line {i + 1}: {'; '.join(wrong)}{note}. Find which file makes {which} wrong, fix it, "
+                f"and run the program again")
+    g = got[i] if i < len(got) else "(nothing)"
+    e = expect[i] if i < len(expect) else "(nothing)"
+    return (f"{head}: line {i + 1} is '{g}' but must be '{e}'. Find which file makes that value wrong, fix it, and "
+            f"run the program again")
+
+
 def _load_expect():
     """Expected output for the DONE gate (update 25), from the file named by AGENT_EXPECT_FILE, or None.
     The file is read by the tool, outside the sandbox; the model cannot change it."""
@@ -2200,14 +2249,7 @@ def _agent_loop(task: str, max_steps: int, msgs: list) -> str:
                         why.append("nothing has been run yet, so the output cannot be checked against the expected "
                                    "output: run the program with run_python")
                     elif _out_lines(last_run) != expect:
-                        got = _out_lines(last_run)
-                        i = next(k for k in range(max(len(got), len(expect)) + 1)
-                                 if k >= len(got) or k >= len(expect) or got[k] != expect[k])
-                        g = got[i] if i < len(got) else "(nothing)"
-                        e = expect[i] if i < len(expect) else "(nothing)"
-                        why.append(f"the last run printed something different from the expected output: line {i + 1} "
-                                   f"is '{g}' but must be '{e}'. Find which file makes that value wrong, fix it, and "
-                                   f"run the program again")
+                        why.append(_expect_diff(_out_lines(last_run), expect))
             if REQUIRE_WORK_BEFORE_DONE and not ran_any:
                 why.append("you have not run any command yet, so nothing has been done. Start with "
                            "read_file or write_file")

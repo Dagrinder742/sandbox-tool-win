@@ -78,7 +78,7 @@ entry two files import the module: the tool names both and runs neither
 entry a module that PRINTS something is not redirected, even though another file imports it
 entry a helper that failed when run alone is cleared by a clean run of the file that imports it
 # update 25: the expected-output gate is part of the DONE gate, which needs run_python
-expect DONE after a clean run that printed orders=4 is REFUSED, naming the first wrong line and the expected one
+expect DONE after a clean run that printed orders=4 is REFUSED, naming each wrong field and the right ones (W6)
 expect the tool's run of main.py after run_python calc.py is the output the gate checks (expected lines -> DONE accepted)
 expect DONE when nothing was run (only read_file): refused, the output cannot be checked
 expect a run that prints too few lines: the missing line is named

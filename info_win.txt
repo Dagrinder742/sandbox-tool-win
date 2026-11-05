@@ -235,4 +235,45 @@ NEXT (Casey): unzip W5 over the git folder (Expand-Archive -Force), git status /
  bench\test_bench.py, tests\test_sandbox_tool.py, src\sandbox_tool.py, info_win.txt), commit "W5: CI fixes", push, and
  paste (or have Copilot summarize) the FAIL lines of any job that is still red, especially macos and windows.
 
+W6 (2026-11-05) FROM CLAUDE: FIELD-LEVEL DIFF IN THE EXPECTED-OUTPUT REFUSAL (model-visible, the next measured change).
+Casey pushed W5; GitHub Actions: linux 3.10-3.13 and windows PASS, macos FAIL (4 checks, see the parked Linux note:
+ BSD sed has no --sandbox, no /proc so no memory cap; allowed to fail, not worked on now).
+WHY (group B of win-W3-omni2, 5 of 10 runs, and 3/3 on WSL zip25): the refusal showed the whole line, "line 1 is
+ 'orders=4 subtotal=58.00 tax=4.64 total=62.64 average=14.50' but must be 'orders=3 ... average=19.33'". The model
+ kept editing calc.py's average (the last number it read) and never went to ingest.py's filter (orders=4).
+CHANGE (sandbox_tool.py, new _expect_diff): when the first wrong line has the same number of words as the expected
+ one, and at least one word is already right, each wrong word is named, and the right ones are listed:
+   "the last run printed something different from the expected output. In line 1: orders is 4 but must be 3;
+    average is 14.50 but must be 19.33 (subtotal, tax and total are already right). Find which file makes those
+    values wrong, fix it, and run the program again"
+ 'name=value' words with the same name are named by their name; other words by position ("word 2 is 'x' but must be
+ 'y'", then "(the other words are already right)"); more than 6 wrong words -> "N more words differ". Unchanged
+ whole-line message (update 25) for: a missing or extra line, a different word count, a one-word line, a line where
+ every word is wrong. It is general (any task with an expected-output file), not written for pipeline_omni_v2.
+ The text always contains "different from the expected output", so the bench's expect_blocks count is unchanged.
+ Version 0.1.0+win.6. Nothing else the model sees changed (system_sha 000c5f86b8).
+TESTS (Linux): main suite 497 checks ALL OK (+10: the omni line names orders and average and lists subtotal, tax and
+ total; a line-2 difference says "In line 2" and "that value"; a word whose name differs is named by position; a
+ missing line, another word count, every word wrong and a one-word line keep the whole-line message; always one line
+ with the bench phrase; the agent-loop check now expects the new text). Python 3.10 / 3.11 / 3.12 / 3.13 ALL OK;
+ cp1252 console ALL OK; RUN_PYTHON=0 ALL OK (the renamed check updated in tests/needs_run_python.txt); test_bench ALL
+ OK (its update-25 test runs the real tool and counts the new text); bench selftest ALL VERIFIERS BEHAVE; pytest 2
+ passed; --selfcheck 26 ok. Broke 6 rules on scratch copies, all caught: no field diff (4 FAIL), no all-wrong
+ fallback (1), no already-right list (3), bench phrase removed (4 + 2 in test_bench), always "those values" (1),
+ agent loop not using the new text (1).
+HASHES: tool_sha b4249f386a (W5 was 9c6d33797c), system_sha 000c5f86b8, pipeline_omni_v2 prompt 08814efaef, verifier
+ 48489e5b3b (all three unchanged).
+HOW TO READ THE NEXT CAMPAIGN: the baseline is win-W3-omni2 (0/10, 0 false-DONE, 623 s per run, group B 5/10).
+ W4's gate fix (no-op refusals) was never measured in a campaign, so a W6 campaign measures W4 + W6 together against
+ W3. W4 only matters in a run like W3's run 1 (1 in 50 so far), so group B's change is W6's to explain. Look at: PASS
+ count, expect_blocks, and whether the runs refused on orders=4 then open ingest.py. n=10 is a screen, not a rate.
+UNVERIFIED: whether the 3B model uses the field names (the whole point; only a campaign shows it); the new text on a
+ real Windows console (plain ASCII, expected fine).
+NEXT (Casey, PowerShell): Expand-Archive -Force the W6 zip over the git folder; run both suites (expect ALL OK twice);
+ git status (expect src\sandbox_tool.py, tests\test_sandbox_tool.py, tests\needs_run_python.txt, info_win.txt);
+ commit "W6: field-level diff in the expected-output refusal"; push. Then, with llama-server on port 8081:
+   $env:LLAMA_URL="http://127.0.0.1:8081/v1/chat/completions"; $env:BENCH_RUN_TIMEOUT="7200"
+   python bench\bench.py run -t pipeline_omni_v2 -n 10 --label win-W6-omni2
+ and send the report (check that the prompt hash is 08814efaef).
+
 # The current source is src/sandbox_tool.py in this repo's zip (not copied here, to keep this file short).

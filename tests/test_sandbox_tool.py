@@ -1483,6 +1483,25 @@ if _po.is_dir():
 # (zip24-omni: 5 of 10 runs said DONE after a clean run that printed orders=4 instead of orders=3)
 check(T._out_lines("[exit 0]\nA  \n\n  \nB\n") == ["A", "B"] and T._out_lines("[exit 0]\n(no output)") == []
       and T._out_lines("[exit 0]") == [], "expect", "_out_lines: printed lines only, trailing spaces and blank lines ignored")
+# W6: field-level diff in the refusal (win-W3-omni2: 5/10 runs fixated on 'average' at the end of the whole line)
+_E = ["orders=3 subtotal=58.00 tax=4.64 total=62.64 average=19.33", "orders=0 subtotal=0.00 tax=0.00 total=0.00 average=0.00"]
+_d = T._expect_diff(["orders=4 subtotal=58.00 tax=4.64 total=62.64 average=14.50"], _E)
+check("In line 1: orders is 4 but must be 3; average is 14.50 but must be 19.33 (subtotal, tax and total are already right). "
+      "Find which file makes those values wrong" in _d, "expect", "_expect_diff: each wrong name=value field is named, the right ones listed", _d)
+_d = T._expect_diff([_E[0], "orders=0 subtotal=0.00 tax=0.00 total=0.00 average=nan"], _E)
+check("In line 2: average is nan but must be 0.00 (orders, subtotal, tax and total are already right). Find which file "
+      "makes that value wrong" in _d, "expect", "_expect_diff: a difference in line 2 names line 2 and says 'that value' for one field", _d)
+_d = T._expect_diff(["count=3 subtotal=58.00"], ["orders=3 subtotal=58.00"])
+check("word 1 is 'count=3' but must be 'orders=3' (the other words are already right)" in _d, "expect",
+      "_expect_diff: a word whose name differs is named by position", _d)
+for _g, _why in ((["orders=3 subtotal=58.00"], "a missing line"), (["a b c"], "a different word count"),
+                 (["x 2 3 4 5"], "every word wrong"), (["7"], "a one-word line")):
+    _d = T._expect_diff(_g, _E if _why != "a one-word line" else ["8"])
+    check(": line " in _d and "is '" in _d and "In line" not in _d, "expect", f"_expect_diff: {_why} falls back to the whole-line message", _d)
+for _g in (["orders=4 subtotal=58.00 tax=4.64 total=62.64 average=14.50"], ["a b c"], [_E[0]]):
+    _d = T._expect_diff(_g, _E)
+    check(_d.startswith("the last run printed something different from the expected output") and "\n" not in _d, "expect",
+          "_expect_diff: always one line with the phrase the bench counts", _d)
 _exp = ROOT / "expected_omni.txt"
 _exp.write_text("orders=3 subtotal=58.00 tax=4.64 total=62.64 average=19.33   \n\norders=0 subtotal=0.00 tax=0.00 total=0.00 average=0.00\n\n")
 os.environ.pop("AGENT_EXPECT_FILE", None)
@@ -1501,9 +1520,9 @@ try:
                                    "def clean(self):\n    return [r for r in self.rows if r.get(\"item\") and r.get(\"qty\", 0) > 0]")
                                + "\n" + _RUN, "DONE: prints the two expected lines"])
         _m = seen[2][-1][1] if len(seen) > 2 else ""
-        check("different from the expected output: line 1 is 'orders=4 subtotal=58.00 tax=4.64 total=62.64 average=14.50' "
-              "but must be 'orders=3 subtotal=58.00 tax=4.64 total=62.64 average=19.33'" in _m, "expect",
-              "DONE after a clean run that printed orders=4 is REFUSED, naming the first wrong line and the expected one", _m[-200:])
+        check("different from the expected output. In line 1: orders is 4 but must be 3; average is 14.50 but must be "
+              "19.33 (subtotal, tax and total are already right)" in _m, "expect",
+              "DONE after a clean run that printed orders=4 is REFUSED, naming each wrong field and the right ones (W6)", _m[-260:])
         check(ans == "prints the two expected lines", "expect", "after the fix the run prints the expected lines and DONE is accepted", ans[:80])
         # the tool's own run of main.py (update 24) is the output that counts
         _po_reset(); (SB / "calc.py").write_text(_CALC_CAST); (SB / "ingest.py").write_text((_po / "selftest" / "good" / "ingest.py").read_text())

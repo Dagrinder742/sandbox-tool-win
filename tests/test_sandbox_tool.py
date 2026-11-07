@@ -943,6 +943,53 @@ T.PROTECTED.clear(); T.PROTECTED.update(_g)
 check(T.run("replace_def rd.py last").startswith("REFUSED") and "no code received" in T.run("replace_def rd.py last"), "replace_def", "no ``` block: refused with where to put it")
 check("usage: replace_def" in T.run("replace_def rd.py", "```python\ndef x():\n    pass\n```"), "replace_def", "missing name: usage shown")
 check("usage: replace_def" in T.run("replace_def"), "replace_def", "no arguments: usage shown")
+# ---- W11: a method by its short name, and the method's first parameter (win-W10.1-omni3: 12 x "replace_def ingest.py
+# clean", 0 x "DataIngester.clean"; the new code was `def clean(rows):`, not a method) ----
+_ING11 = ('class DataIngester:\n    def __init__(self, rows):\n        self.rows = rows\n\n    def clean(self):\n'
+          '        return [r for r in self.rows if r["qty"] >= 0]\n')
+_BLK = lambda c: f"```python\n{c}\n```"
+(SB / "m11.py").write_text(_ING11)
+_r = T.run("replace_def m11.py clean", _BLK('def clean(self):\n    return [r for r in self.rows if r["qty"] > 0]'))
+_t = (SB / "m11.py").read_text()
+check(_r.startswith("[exit 0]") and "clean is a method of DataIngester, so the tool replaced DataIngester.clean" in _r
+      and '    def clean(self):\n        return [r for r in self.rows if r["qty"] > 0]\n' in _t and "def __init__" in _t,
+      "w11", "a method by its short name (one class has it): replaced as Class.method, indented into the class, and said so", _r[:220])
+(SB / "m11.py").write_text(_ING11)
+_r = T.run("replace_def m11.py clean", _BLK('def clean(rows):\n    return [r for r in rows if r["qty"] > 0]'))
+check(_r.startswith("REFUSED") and "does not take self first" in _r and "`def clean(self):` (line 5)" in _r
+      and (SB / "m11.py").read_text() == _ING11, "w11",
+      "the real run-1 edit (`def clean(rows):` for a method): refused, showing the method's first line; file unchanged", _r[:220])
+_r = T.run("replace_def m11.py DataIngester.clean", _BLK('def clean():\n    return []'))
+check(_r.startswith("REFUSED") and "does not take self first" in _r and (SB / "m11.py").read_text() == _ING11, "w11",
+      "the first-parameter check also applies to the full Class.method name", _r[:120])
+(SB / "m11.py").write_text("class A:\n    def go(self):\n        return 1\n\nclass B:\n    def go(self):\n        return 2\n")
+_r = T.run("replace_def m11.py go", _BLK("def go(self):\n    return 3"))
+check(_r.startswith("REFUSED") and "is a method of 2 classes (A, B)" in _r and "A.go" in _r and "return 3" not in (SB / "m11.py").read_text(),
+      "w11", "two classes with that method: refused (no guessing), names both and the form to use", _r[:160])
+(SB / "m11.py").write_text("def go():\n    return 0\n\nclass A:\n    def go(self):\n        return 1\n")
+_r = T.run("replace_def m11.py go", _BLK("def go():\n    return 9"))
+_t = (SB / "m11.py").read_text()
+check(_r.startswith("[exit 0]") and "def go():\n    return 9\n" in _t and "        return 1\n" in _t and "is a method of" not in _r,
+      "w11", "a top-level def with that name wins over a method of the same name (as before)", _r[:120])
+(SB / "m11.py").write_text("class A:\n    @staticmethod\n    def tool(x):\n        return x\n\n    @classmethod\n    def make(cls):\n        return cls()\n")
+_r1 = T.run("replace_def m11.py tool", _BLK("@staticmethod\ndef tool(y):\n    return y + 1"))
+_r2 = T.run("replace_def m11.py make", _BLK("@classmethod\ndef make(k):\n    return k()"))
+check(_r1.startswith("[exit 0]") and _r2.startswith("REFUSED") and "does not take cls first" in _r2, "w11",
+      "a staticmethod may change its first parameter; a classmethod must keep cls", str((_r1[:60], _r2[:100])))
+(SB / "m11.py").write_text("def f(a):\n    return a\n")
+_r = T.run("replace_def m11.py f", _BLK("def f(b):\n    return b"))
+check(_r.startswith("[exit 0]"), "w11", "a plain function may rename its parameters (the check is only for methods)", _r[:80])
+(SB / "m11.py").write_text(_ING11)
+_r = T.run("replace_def m11.py nothere", _BLK("def nothere(self):\n    pass"))
+check(_r.startswith("REFUSED") and "no def or class named nothere" in _r, "w11", "a name that is nowhere: the old refusal, unchanged", _r[:100])
+(SB / "m11.py").write_text(_ING11)
+ans, out, seen = play(["CMD: replace_def m11.py clean\n" + _BLK('def clean(self):\n    return [r for r in self.rows if r["qty"] > 0]'),
+                       "DONE: x"])
+_m = seen[1][-1][1] if len(seen) > 1 else ""
+check("You had not looked at m11.py yet" in _m and "so the tool replaced DataIngester.clean" in _m
+      and 'r["qty"] > 0' in (SB / "m11.py").read_text(), "w11",
+      "agent: short-name edit of an UNREAD file (the real W10.1 case): the tool reads it, then applies it as Class.method", _m[-200:])
+(SB / "m11.py").unlink()
 check(T.parse_reply("CMD: replace_def a.py f\n```python\ndef f():\n    pass\n```\nDONE: x")[0] == "cmd" and "replace_def" in T.BLOCK_CMDS, "replace_def", "replace_def is a block command for the reply parser")
 check("replace_def" in T.SYSTEM and "Example replace_def" in T.SYSTEM and "replace_def" in T.run("zzz"), "replace_def", "the SYSTEM prompt and the allowed-commands message mention it")
 

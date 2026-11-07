@@ -57,7 +57,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-__version__ = "0.1.0+win.10.1"
+__version__ = "0.1.0+win.11"
 
 
 def _default_sandbox() -> Path:
@@ -1419,6 +1419,27 @@ def _find_def(tree, dotted: str):
     return node
 
 
+_DEF_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _method_owner(tree, name: str):
+    """W11: a short name with no top-level def/class of that name: the ONE top-level class that has a method with it
+    -> 'Class.name'. None when it is a top-level name (or not a method anywhere); Refused when several classes have it."""
+    if "." in name or any(isinstance(n, (*_DEF_TYPES, ast.ClassDef)) and n.name == name for n in tree.body):
+        return None
+    owners = [c.name for c in tree.body if isinstance(c, ast.ClassDef)
+              and any(isinstance(m, _DEF_TYPES) and m.name == name for m in c.body)]
+    if len(owners) > 1:
+        raise Refused(f"{name} is a method of {len(owners)} classes ({', '.join(owners)}), so replace_def cannot tell "
+                      f"which one you mean. Write Class.method, for example {owners[0]}.{name}")
+    return f"{owners[0]}.{name}" if owners else None
+
+
+def _first_param(fn):
+    a = fn.args.posonlyargs + fn.args.args
+    return a[0].arg if a else None
+
+
 def cmd_replace_def(path_str: str, name: str, new_code: str) -> str:
     """Replace ONE whole function / method / class in a .py file with new_code (the complete new
     definition). The old version is found with ast, so the model copies no old text and counts no
@@ -1437,8 +1458,13 @@ def cmd_replace_def(path_str: str, name: str, new_code: str) -> str:
         except SyntaxError as e:
             return (f"REFUSED: {path_str} already has a syntax error (line {e.lineno}: {e.msg}), so its functions "
                     f"cannot be located. Repair that line with patch_file first")
+        asked, found = name, ""
+        full = _method_owner(tree, name)
+        if full:
+            name, found = full, f" ({asked} is a method of {full.split('.')[0]}, so the tool replaced {full})"
         node = _find_def(tree, name)
         short = name.split(".")[-1]
+        parent = _find_def(tree, ".".join(name.split(".")[:-1])) if "." in name else None
 
         code = textwrap.dedent(new_code).strip("\n")
         try:
@@ -1456,6 +1482,12 @@ def cmd_replace_def(path_str: str, name: str, new_code: str) -> str:
                     f"Keep the same name, or nothing was changed")
         if isinstance(top[0], ast.ClassDef) != isinstance(node, ast.ClassDef):
             return f"REFUSED: {name} is a {'class' if isinstance(node, ast.ClassDef) else 'function'} but the block defines the other kind"
+        old_p = _first_param(node) if isinstance(parent, ast.ClassDef) and isinstance(node, _DEF_TYPES) else None
+        if old_p in ("self", "cls") and _first_param(top[0]) != old_p:
+            first = content.splitlines()[node.lineno - 1].strip()
+            return (f"REFUSED: {short} is a method of class {parent.name}, and your new {short} does not take {old_p} "
+                    f"first, so it would break when it is called. Its current first line is `{first}` "
+                    f"(line {node.lineno}). Keep that first line and change the body. Nothing was changed")
 
         start = min([node.lineno] + [d.lineno for d in node.decorator_list])
         end = node.end_lineno
@@ -1472,7 +1504,7 @@ def cmd_replace_def(path_str: str, name: str, new_code: str) -> str:
         _write_text(target, new_content, crlf)
         log_to_index(path_str, "patched")
         return (f"[exit 0]\nSuccessfully replaced {name} in {path_str} "
-                f"(old lines {start}-{end} are now {len(new_text.splitlines())} lines)")
+                f"(old lines {start}-{end} are now {len(new_text.splitlines())} lines){found}")
     except Refused as e:
         return f"REFUSED: {e}"
     except Exception as e:

@@ -522,6 +522,49 @@ NEXT CANDIDATE (not built, Casey to choose): when the test gate refuses DONE, th
  its PASS/FAIL lines in the refusal (like update 24 runs main.py for a module, and replace_def reads an unread file).
  That gives the model the FAIL line it otherwise never asks for. Model-visible, so measured on its own after W10.1.
 
+W10.1 RESULT (2026-11-07, Casey): report 20261107-1527-win-w10-1-omni3, tool_sha 5febd5eddb, system_sha 1ce60c3cc5,
+ v3 prompt ec301b3760, verifier c92d987576, test 1cd995d2d8. THE v3 BASELINE. 0/10 PASS, 0 false-DONE, 14.6 steps,
+ 508 s, 29 refusals; 7 step limit (16), 3 aborted. Bench fix confirmed: "test_contract.py is unchanged" no longer fails.
+ The model ran test_contract.py in 6 of 10 runs (W10: 3) and in all 6 saw "FAIL ingest.py: clean() turns every kept
+ price into a float" and went for clean(). NONE of those edits landed: it wrote `replace_def ingest.py clean` 12
+ times and `DataIngester.clean` 0 times (W10: 2); the tool refused each with "no def or class named clean ... (for a
+ method write Class.method)" and the model never adapted (29 such refusals in 7 runs). Its code was also a plain
+ function `def clean(rows):`, not the method `def clean(self):`. So "clean() returns price as a float" failed 10/10.
+ Run 3 (13/14) replaced the whole DataIngester class and missed only the cast.
+NEXT CANDIDATE W11 (not built; replaces the earlier "tool runs the test" idea, which matters less now that the model
+ runs it in 6/10): replace_def finds a METHOD by its short name when the file has no top-level def of that name and
+ exactly ONE class defines it (says so; two or more classes -> refused as now). If the new code's parameters do not
+ start like the existing method's (e.g. `def clean(rows):` for `def clean(self):`), refuse and show the method's
+ current first line. General (any method in any file), no prompt change.
+
+W11 (2026-11-07) FROM CLAUDE: replace_def FINDS A METHOD BY ITS SHORT NAME + CHECKS A METHOD'S FIRST PARAMETER
+ (Casey: "Proceed"). No system prompt change: system_sha stays 1ce60c3cc5.
+WHY: win-W10.1-omni3: after the test's "FAIL ingest.py: clean() turns every kept price into a float" the model sent
+ `replace_def ingest.py clean` 12 times (DataIngester.clean 0 times) and every edit was refused ("no def or class
+ named clean"); its code was also `def clean(rows):`, a plain function, which would break as a method.
+CHANGE (sandbox_tool.py, _method_owner, _first_param, in cmd_replace_def):
+ - A short name with no top-level def/class of that name, which exactly ONE top-level class has as a method, is
+   replaced as Class.method; the result adds "(clean is a method of DataIngester, so the tool replaced
+   DataIngester.clean)". Two or more classes with it: refused, naming them and the Class.method form. A top-level
+   def of that name still wins. A name that is nowhere: the old refusal, unchanged.
+ - For any method edit (short or full name): if the existing method takes self (or cls) first and the new code does
+   not, refused: "clean is a method of class DataIngester, and your new clean does not take self first, so it would
+   break when it is called. Its current first line is `def clean(self):` (line 7). Keep that first line and change
+   the body. Nothing was changed". staticmethods and plain functions may rename parameters.
+ - Version 0.1.0+win.11, tool_sha caa623d218. README: the replace_def row says both.
+TESTS (Linux): main suite 550 ALL OK (+9 "w11": short name replaced and indented into the class; run 1's exact
+ `def clean(rows):` refused with the first line; check also for Class.method; two classes refused; top-level def
+ wins; staticmethod free / classmethod keeps cls; plain function free; unknown name unchanged; agent: short-name edit
+ of an UNREAD file is auto-read then applied). test_bench ALL OK; Python 3.10-3.13, cp1252, RUN_PYTHON=0 ALL OK;
+ selftest ALL VERIFIERS BEHAVE; --selfcheck 26 ok. Broke 6 rules on copies, all caught: no lookup (5 FAIL), guess
+ between two classes (1), no first-parameter check (3), check also on plain functions (30), lookup overrides a
+ top-level def (1), no "so the tool replaced" note (2).
+HOW TO MEASURE: pipeline_omni_v3 -n 10 against win-W10.1-omni3 (same prompt ec301b3760, same system_sha). Look at:
+ "so the tool replaced DataIngester.clean" (how often it fires), "does not take self first" refusals and what comes
+ next, "clean() returns price as a float" (10/10 failed in W10.1), PASS. n=10 = a screen.
+UNVERIFIED: the model's behaviour. Risk to watch: the new refusal costs a step; if the model keeps sending
+ `def clean(rows):` it trades one refusal for another.
+
 PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
  --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the
  tool; display only, the model always gets the full output, so nothing is comparable-breaking). Side effect: the

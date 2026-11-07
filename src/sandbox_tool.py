@@ -57,7 +57,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-__version__ = "0.1.0+win.9"
+__version__ = "0.1.0+win.10"
 
 
 def _default_sandbox() -> Path:
@@ -162,6 +162,8 @@ PREVIEW_LINES = int(os.environ.get("PREVIEW_LINES", "15"))  # 0 = show everythin
 # Refusals are logged next to (not inside) the sandbox, e.g. ./sandbox.refused.log
 AUDIT_LOG = Path(os.environ.get("AUDIT_LOG", str(SANDBOX.parent / f"{SANDBOX.name}.refused.log"))).resolve()
 PROTECTED = {Path(__file__).resolve(), AUDIT_LOG.resolve()}
+# W10: files the model may read and RUN but never change (a task's test file, while an agent run uses it).
+READ_ONLY = set()
 # run_python limits (see the notes above cmd_run_python)
 RUN_PYTHON = os.environ.get("RUN_PYTHON", "1") != "0" and (_has_posix_limits() or _has_job_objects())  # off where no limits work
 RUN_TIMEOUT_S = int(os.environ.get("RUN_TIMEOUT_S", "10"))
@@ -261,6 +263,9 @@ def _check_writable(p: str):
     real = Path(os.path.realpath(SANDBOX / p))
     if real in PROTECTED:
         raise Refused(f"protected file, cannot modify: {p}")
+    if real in READ_ONLY:
+        raise Refused(f"{p} is the task's test file: it checks what correct code does, so it cannot be changed. "
+                      f"Fix the code it tests, then run_python {p} again")
     if "__pycache__" in real.parts:  # never let the model plant bytecode
         raise Refused(f"cannot write inside __pycache__: {p}")
 
@@ -1031,7 +1036,7 @@ def cmd_run_python(path_str: str) -> str:
     out = tempfile.TemporaryFile()
     cfg = {
         "sandbox": str(SANDBOX), "tmp": os.path.realpath(tmp),
-        "protected": [str(p) for p in PROTECTED], "read_roots": _read_roots(),
+        "protected": [str(p) for p in PROTECTED | READ_ONLY], "read_roots": _read_roots(),
         "cpu": RUN_TIMEOUT_S + 2, "fsize": RUN_MAX_FILE_MB * 1024 * 1024,
     }
     env = {"PATH": SAFE_PATH, "HOME": str(SANDBOX),
@@ -2297,6 +2302,29 @@ def _load_expect():
         return [l.rstrip() for l in f.read().splitlines() if l.strip()]
 
 
+def _test_file():
+    """W10: the task's test file (AGENT_TEST_FILE, a path inside the sandbox), or "" when the task has none."""
+    name = os.environ.get("AGENT_TEST_FILE", "").strip()
+    if not name:
+        return ""
+    _check_path(name)
+    return os.path.normpath(name).replace(os.sep, "/")
+
+
+def _code_sig(skip: str) -> str:
+    """A fingerprint of every .py file in the sandbox except `skip`: changes when any code changes, by any route."""
+    h = hashlib.sha256()
+    for f in sorted(SANDBOX.rglob("*.py")):
+        rel = f.relative_to(SANDBOX).as_posix()
+        if rel == skip or "__pycache__" in f.parts or any(x.startswith(".") for x in f.relative_to(SANDBOX).parts):
+            continue
+        try:
+            h.update(rel.encode() + b"\0" + f.read_bytes() + b"\0")
+        except OSError:
+            pass
+    return h.hexdigest()
+
+
 def agent(task: str, max_steps: int = 10) -> str:
     msgs = [("system", SYSTEM), ("user", task)]
     result = "(stopped: crashed)"
@@ -2306,6 +2334,7 @@ def agent(task: str, max_steps: int = 10) -> str:
     finally:
         global _VIEWS
         _VIEWS = None    # W9: view tracking only inside an agent run (a command typed by hand is not tracked)
+        READ_ONLY.clear()  # W10: the test file is read-only only while the run that uses it lasts
         _dump_transcript(task, result, msgs)
 
 
@@ -2339,6 +2368,17 @@ def _agent_loop(task: str, max_steps: int, msgs: list) -> str:
         return f"(stopped: ERROR: cannot read the expected-output file AGENT_EXPECT_FILE: {e})"
     if expect is not None:
         print(f"[expect] DONE needs a run that prints exactly {len(expect)} expected line(s)")
+    try:
+        test_name = _test_file()
+    except Refused as e:
+        return f"(stopped: ERROR: AGENT_TEST_FILE: {e})"
+    if test_name and not (SANDBOX / test_name).is_file():
+        print(f"[test] AGENT_TEST_FILE {test_name} is not in the sandbox: the test gate is off for this run")
+        test_name = ""
+    test_ok_sig = None   # W10: code fingerprint at the last PASSING run of the test file (None = not passed)
+    if test_name:
+        READ_ONLY.add(Path(os.path.realpath(SANDBOX / test_name)))
+        print(f"[test] DONE needs a passing run of {test_name} after the last code change ({test_name} is read-only)")
 
     def record_run(t, res):
         """Gate bookkeeping for one run_python of t (the model's own run, or the tool's run of an entry point)."""
@@ -2346,6 +2386,9 @@ def _agent_loop(task: str, max_steps: int, msgs: list) -> str:
         seen = {t} | _local_imports(t)
         unverified.difference_update(seen)
         last_exit[t] = code
+        nonlocal test_ok_sig
+        if test_name and t == test_name:
+            test_ok_sig = _code_sig(test_name) if code == 0 else None
         if code == 0:
             for f in seen:  # a clean run of main.py also exercised the helpers it imports
                 last_exit[f] = 0 if f in last_exit or f != t else last_exit.get(f, 0)
@@ -2368,7 +2411,7 @@ def _agent_loop(task: str, max_steps: int, msgs: list) -> str:
                 if unverified:
                     why.append("you changed " + ", ".join(sorted(unverified)) +
                                " and have not run it since: use run_python on it first")
-                bad = sorted(f for f, c in last_exit.items() if c != 0 and f not in unverified)
+                bad = sorted(f for f, c in last_exit.items() if c != 0 and f not in unverified and f != test_name)
                 if bad:
                     why.append("the last run of " + ", ".join(bad) + " failed; fix it with replace_def "
                                "or patch_file and run_python again")
@@ -2378,6 +2421,14 @@ def _agent_loop(task: str, max_steps: int, msgs: list) -> str:
                                    "output: run the program with run_python")
                     elif _out_lines(last_run) != expect:
                         why.append(_expect_diff(_out_lines(last_run), expect))
+                if test_name and not unverified:
+                    if test_ok_sig is None:
+                        why.append(f"the task's tests in {test_name} have not passed yet (not run, or the last run "
+                                   f"failed): run_python {test_name}. Each FAIL line names a rule the code breaks: "
+                                   f"fix the code, never the test")
+                    elif test_ok_sig != _code_sig(test_name):
+                        why.append(f"the code changed after the task's tests in {test_name} last passed: "
+                                   f"run_python {test_name} again")
             if REQUIRE_WORK_BEFORE_DONE and not ran_any:
                 why.append("you have not run any command yet, so nothing has been done. Start with "
                            "read_file or write_file")

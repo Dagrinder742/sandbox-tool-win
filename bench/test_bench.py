@@ -344,6 +344,25 @@ hang.write_text("while True:\n    pass\n")
 v, text, p, n = bm.judge(bm.all_tasks()["wordcount"], hang, None)
 check(v == "FAIL", "a hanging file cannot hang the verifier", text[:150])
 
+# ---- W10: the test gate in the bench ----
+_v3 = bm.all_tasks()["pipeline_omni_v3"]
+check(_v3.test_file == "test_contract.py" and _v3.max_steps == 16 and bm.all_tasks()["pipeline_omni_v2"].test_file is None,
+      "W10 pipeline_omni_v3 declares test_contract.py as its test file (v2 has none, so v2 runs are unchanged)")
+_log = ("model> DONE: x\ntool>  REFUSED: cannot accept DONE yet: the task's tests in test_contract.py have not passed yet "
+        "(not run, or the last run failed): run_python test_contract.py.\nmodel> DONE: y\ntool>  REFUSED: cannot accept "
+        "DONE yet: the code changed after the task's tests in test_contract.py last passed: run_python test_contract.py again.\n")
+check(bm.parse_log(_log, {}).get("test_blocks") == 2 and bm.parse_log(_log, {}).get("expect_blocks") == 0,
+      "W10 the report counts test-gate refusals (both messages) apart from expected-output refusals")
+_case = kit / "tasks" / "pipeline_omni_v3" / "selftest" / "good" / "main.py"
+v, text, p, n = bm.judge(_v3, _case, tool)
+check(v == "PASS" and "test_contract.py is unchanged" in text, "W10 judge hands the test file to the verifier (good case PASS)", text[-160:])
+_edited = kit / "tasks" / "pipeline_omni_v3" / "selftest" / "bad_test_edited" / "main.py"
+v, text, p, n = bm.judge(_v3, _edited, tool)
+check(v == "FAIL" and "FAIL  test_contract.py is unchanged" in text, "W10 an edited test file fails the verifier", text[-160:])
+_src = (kit / "bench.py").read_text()
+check('env.pop("AGENT_TEST_FILE", None)' in _src and 'env["AGENT_TEST_FILE"] = task.test_file' in _src,
+      "W10 a run passes AGENT_TEST_FILE only for a task that declares one (an inherited value is removed)")
+
 if os.environ.get("KEEP"):
     print("kept:", tmp)
 else:

@@ -1707,6 +1707,78 @@ try:
 finally:
     os.environ.pop("AGENT_EXPECT_FILE", None)
 
+# ---- W10: test gate (AGENT_TEST_FILE): the task's test file is read-only, DONE needs a passing run of it ----
+_TM_BAD = 'def price(row):\n    return row["price"]\n'
+_TM_GOOD = 'def price(row):\n    return float(row["price"])\n'
+_TT = ('from tm import price\nok = type(price({"price": "1.5"})) is float\n'
+       'print("PASS price is a float" if ok else "FAIL tm.py: price() must return a float")\n'
+       'raise SystemExit(0 if ok else 1)\n')
+def _tg_setup(code=_TM_BAD):
+    (SB / "tm.py").write_text(code); (SB / "tt.py").write_text(_TT)
+_rv3 = T.REQUIRE_VERIFY; T.REQUIRE_VERIFY = True
+try:
+    if T.RUN_PYTHON:
+        os.environ["AGENT_TEST_FILE"] = "tt.py"
+        _tg_setup()
+        ans, out, seen = play(["DONE: x", "DONE: x", "DONE: x"])
+        check("the task's tests in tt.py have not passed yet" in out and ans.startswith("(stopped: DONE was blocked 3 times"),
+              "testgate", "DONE before the test was ever run is refused (and 3 refusals stop the run)", out[-200:])
+        _tg_setup()
+        ans, out, seen = play(["CMD: run_python tt.py", "DONE: x", "DONE: x", "DONE: x"])
+        _m = _last(seen, 2)
+        check("FAIL tm.py: price() must return a float" in _last(seen, 1) and "have not passed yet" in _m
+              and "fix the code, never the test" in _m and "failed; fix it with replace_def" not in _m, "testgate",
+              "a FAILING test run: the model sees the FAIL line; DONE refused with the test message, not 'fix it' (the test)", _m[-220:])
+        _tg_setup()
+        ans, out, seen = play(["CMD: run_python tt.py", R("tm.py", "price", '    def price(row):\n        return float(row["price"])').replace("    def", "def").replace("        return", "    return"),
+                               "CMD: run_python tt.py", "DONE: fixed"])
+        check(ans == "fixed" and "PASS price is a float" in _last(seen, 3), "testgate",
+              "fail -> fix the code -> the test passes -> DONE accepted", ans[:80])
+        _tg_setup(_TM_GOOD)
+        (SB / "trun.py").write_text('from tm import price\nprint(price({"price": "2"}))\n')
+        ans, out, seen = play(["CMD: run_python tt.py", R("tm.py", "price", 'def price(row):\n    return float(row["price"]) + 0'),
+                               "CMD: run_python trun.py", "DONE: x", "DONE: x", "DONE: x"])
+        check("the code changed after the task's tests in tt.py last passed" in out, "testgate",
+              "the test passed, then the code changed (and was run, but not the test): DONE refused until the test runs again", out[-200:])
+        (SB / "trun.py").unlink()
+        _tg_setup()
+        ans, out, seen = play([W("tt.py", "print('PASS')"), P("tt.py", "ok = ", "ok = True or "),
+                               "CMD: sed -i s/ok/ko/ tt.py", "DONE: x"])
+        check((SB / "tt.py").read_text() == _TT and out.count("is the task's test file") >= 2, "testgate",
+              "write_file / patch_file / sed -i on the test file are refused and it stays unchanged", out[-300:])
+        _tg_setup()
+        (SB / "evil.py").write_text('open("tt.py", "w").write("print(1)")\n')
+        ans, out, seen = play(["CMD: run_python evil.py", "DONE: x"])
+        check((SB / "tt.py").read_text() == _TT, "testgate", "a script run with run_python cannot overwrite the test file", out[-160:])
+        (SB / "evil.py").unlink()
+        check(not T.READ_ONLY, "testgate", "the test file is read-only only during the run that uses it (cleared after)")
+        _r = T.run("patch_file tt.py", "<<<<<<< SEARCH\nok = \n=======\nok2 = \n>>>>>>> REPLACE\n")
+        check(not _r.startswith("REFUSED") or "task's test file" not in _r, "testgate",
+              "outside an agent run (a human typing a command) the test file is a normal file", _r[:100])
+        os.environ["AGENT_TEST_FILE"] = "missing_test.py"
+        _tg_setup(_TM_GOOD)
+        ans, out, seen = play(["CMD: run_python tm.py", "DONE: ok"])
+        check(ans == "ok" and "is not in the sandbox: the test gate is off" in out, "testgate",
+              "AGENT_TEST_FILE naming a file that is not there: the gate is off and says so", out[:200])
+        os.environ["AGENT_TEST_FILE"] = "../outside_test.py"
+        ans, out, seen = play(["DONE: x"])
+        check(ans.startswith("(stopped: ERROR: AGENT_TEST_FILE") and not seen, "testgate",
+              "AGENT_TEST_FILE outside the sandbox stops the run before the model is asked", ans[:90])
+        os.environ.pop("AGENT_TEST_FILE", None)
+        _tg_setup(_TM_GOOD); (SB / "tt.py").unlink()
+        (SB / "trun.py").write_text('from tm import price\nprint(price({"price": "2"}))\n')
+        ans, out, seen = play(["CMD: run_python trun.py", "DONE: ok"])
+        (SB / "trun.py").unlink()
+        check(ans == "ok" and "[test]" not in out, "testgate", "no AGENT_TEST_FILE: no test gate (behaviour as before)", out[:120])
+    else:
+        check(True, "testgate", "skipped: the test gate needs run_python")
+finally:
+    os.environ.pop("AGENT_TEST_FILE", None)
+    T.REQUIRE_VERIFY = _rv3
+    T.READ_ONLY.clear()
+    for _n in ("tm.py", "tt.py", "evil.py", "trun.py"):
+        (SB / _n).unlink(missing_ok=True)
+
 # _entry_points: which file to run when a module only defines code (no run_python needed)
 for _n, _src in (("e_util.py", "X = 1\n"), ("e_calc.py", "import e_util\n"), ("e_ing.py", "Y = 2\n"),
                  ("e_main.py", "import e_calc\nfrom e_ing import Y\nprint(Y)\n")):

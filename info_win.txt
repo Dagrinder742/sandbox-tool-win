@@ -422,6 +422,73 @@ TERMUX VERIFIED (2026-11-05, Casey, Android aarch64, Python 3.13.13, git 2.54.0)
  Note: the phone's ~/OKX-Terminal/sandbox-tool is the Linux line's folder; the pip command there now runs the
  Windows-line package (no earlier pip install was replaced).
 
+W9 RESULT (2026-11-05, Casey, --live): tool_sha fbc0744144, system_sha 1ce60c3cc5. TWO omni campaigns ran AT THE SAME
+ TIME on one llama-server (total_slots 1, n_ctx 32768: requests queued, every request had the full context, so the
+ model saw the same as in a single campaign; the seconds and tok/s are inflated and NOT comparable). Reports
+ 20261105-1511 and 20261105-1623 (win-W9-omni2, n=20 together) and 20261105-1757-win-w9-skill4.
+ skill_v4: 10/10, 0 false-DONE, 3.0 steps, 0 refusals (W8: 10/10, 3.5, 2). No regression.
+ pipeline_omni_v2 (n=20)   W9: 0/20 PASS, right output 6/20 (all 6 = false-DONE: cast in calc.py), filter fixed 4/20,
+                           refusals 57, Stock leak 0.   W8 (n=10): 0/10, right output 4/10, filter fixed 6/10.
+ replace_lines WAS NEVER USED (0 of 20 runs; the model never even wrote it). Every edit was replace_def (98), as in
+ W8 (49 + 1). Since W8 there has been no patch_file and no "search text not found" in 30 omni runs: the failure W9
+ was built for (W6 run 10) disappeared when the Stock example was removed. So W9 changed nothing it could show here.
+ Filter fixed 6/10 -> 4/20 is borderline (Fisher p=0.045, one of several comparisons): a thing to watch, not a
+ finding. Right output 4/10 -> 6/20 is the same rate (p=0.69).
+VERDICT: keep W9 (no cost on skill_v4, no measured harm, and it can edit lines outside a function, which replace_def
+ cannot). The open problem is unchanged: in 30 of 30 runs since W8 the price cast went to calc.py (where the
+ TypeError shows) instead of ingest.py's clean() (where the task says it belongs).
+CANDIDATE (not built, Casey to choose): a TEST GATE. A task may ship a test file the model can see and run (the
+ spec as code, e.g. "clean() returns floats"); DONE needs a passing run of it, like the expected-output gate needs
+ the output. General (any task with tests), and how real developers work. Needs a new task version (v3) so it does
+ not change pipeline_omni_v2's numbers; the visible test must not be the verifier itself.
+
+W10 (2026-11-05) FROM CLAUDE: TEST GATE + NEW TASK pipeline_omni_v3 (Casey: "proceed with this").
+WHY: in 30 of 30 omni runs since W8 the price cast went into calc.py (where the TypeError shows) instead of
+ ingest.py's clean() (where the task says it belongs). The output is the same either way, so the expected-output gate
+ cannot see it and the model gets no signal; only the hidden verifier catches it.
+CHANGE (sandbox_tool.py; the system prompt is NOT changed, system_sha stays 1ce60c3cc5):
+ - AGENT_TEST_FILE (a path inside the sandbox). If the file exists at the start of an agent run, it is READ-ONLY for
+   that run: _check_writable refuses it ("is the task's test file ... Fix the code it tests"), which covers
+   write_file, patch_file, replace_def, replace_lines and sed -i; and it is in the protected list handed to the
+   run_python child, so a script cannot overwrite or delete it. It can still be read and RUN. Cleared when the run
+   ends (a command typed by hand treats it as a normal file).
+ - DONE is refused until a run of the test file exited 0 AFTER the last code change: the tool keeps a fingerprint
+   (sha256) of every .py file in the sandbox at the last passing run, so any change by any route resets it.
+   Messages: "the task's tests in X have not passed yet (not run, or the last run failed): run_python X. Each FAIL
+   line names a rule the code breaks: fix the code, never the test" / "the code changed after the task's tests in X
+   last passed: run_python X again". A failing test run is not reported as "the last run of X failed; fix it".
+ - AGENT_TEST_FILE outside the sandbox stops the run before the model is asked; a named file that is not there turns
+   the gate off and says so. Version 0.1.0+win.10.
+BENCH: task.json "test_file" (must be in files/) -> AGENT_TEST_FILE (an inherited value is removed for other tasks);
+ the report shows "TEST GATE ON (file sha)" and counts test-gate refusals; judge() hands the verifier a copy of the
+ test file (data, never run) so it can check it was not changed.
+NEW TASK pipeline_omni_v3 = v2 + files/test_contract.py (5 rules on its OWN data: rows clean() keeps, prices become
+ floats, no rows -> no rows, subtotal, average_order([]) = 0.0; prints PASS/FAIL per rule naming the file, exit 1 on
+ any FAIL) + the test gate + prompt: one paragraph about the test and a step 4 "run test_contract.py, fix what FAILs"
+ + max_steps 16 (v2 14, for the extra test runs) + verifier check "test_contract.py is unchanged" (14 checks) +
+ selftest case bad_test_edited. On bad_cast_in_calc (the 30/30 failure) the visible test prints exactly "FAIL
+ ingest.py: clean() turns every kept price into a float: ... price of 'tea' is str '2.00'". The visible test is not
+ the verifier: bad_blocked_in_calc, bad_main_edited and bad_test_edited pass it and are still failed by the verifier.
+ pipeline_omni_v2 is untouched (prompt 08814efaef, verifier 48489e5b3b): its results stay comparable.
+HASHES: tool_sha 6aeb8ed1c6 (W9 fbc0744144), system_sha 1ce60c3cc5 (unchanged); pipeline_omni_v3 prompt ec301b3760,
+ verifier c92d987576, test_contract.py 1cd995d2d8.
+TESTS (Linux): main suite 539 checks ALL OK (+11 "testgate": DONE before any test run refused; a failing run shows
+ the FAIL line and the test message; fail -> fix -> pass -> DONE accepted; code changed after a pass (run, but not
+ the test) refused; write_file / patch_file / sed -i on the test refused, file unchanged; a script cannot overwrite
+ it; read-only cleared after the run; a hand-typed command may edit it; a missing test file turns the gate off; a
+ path outside the sandbox stops the run; no AGENT_TEST_FILE = no gate). test_bench ALL OK (+5 W10). Python 3.10-3.13
+ ALL OK (both suites); cp1252 ALL OK; RUN_PYTHON=0 ALL OK (the gate's checks collapse to one "skipped" line); bench
+ selftest ALL VERIFIERS BEHAVE (v3: 11 cases); --selfcheck 26 ok. Broke 9 rules on separate copies, all caught:
+ test file writable (1), scripts may write it (1), no gate at DONE (3), no changed-after-pass check (1), read-only
+ not cleared (2), test file counted as a failed run (1), passing run not recorded (2), judge does not copy the test
+ file (2 bench), test-gate refusals not counted (1 bench).
+PUBLIC DOCS: README (Test gate bullet; AGENT_EXPECT_FILE and AGENT_TEST_FILE rows in Settings) and bench/README.md
+ (Test gate + pipeline_omni_v3 paragraphs).
+HOW TO MEASURE: pipeline_omni_v3 -n 10 (a NEW baseline: not comparable with v2), then compare v3 runs with each
+ other. Look at: PASS, how often the test was run, whether "FAIL ingest.py: clean() turns every kept price into a
+ float" is followed by an edit of ingest.py, test-gate refusals, step-limit endings (16 steps). n=10 = a screen.
+UNVERIFIED: everything about the model's behaviour; the gate on a real Windows run (the tests ran on Linux).
+
 PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
  --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the
  tool; display only, the model always gets the full output, so nothing is comparable-breaking). Side effect: the

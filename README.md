@@ -59,6 +59,10 @@ Every reply from the model is an optional one-line `NOTE:` (its memory) plus exa
 
 Things the tool does so a small model keeps on track:
 
+* **Test gate** (optional, `AGENT_TEST_FILE`). A task can ship a test file that states its rules as code. The
+  model can read and run it but never change it, and `DONE` is refused until it passes after the last code change,
+  so a program that prints the right output for the wrong reason is still caught.
+
 * **DONE gate.** `DONE` is refused while a `.py` file was changed and not run since, while its last run
   failed, or while a write/patch was refused and never redone. (`exit 0` proves the script ran, not that it
   is correct: check results yourself, for example with the benchmark kit.)
@@ -197,6 +201,8 @@ Report escapes privately (see `SECURITY.md`).
 | `AUDIT_LOG` | `<sandbox>.refused.log` | Where refused commands are logged. |
 | `AGENT_MAX_STEPS` | `10` | Steps per run. |
 | `AGENT_TRANSCRIPT` | (unset) | Save the whole conversation as JSON to this file. |
+| `AGENT_EXPECT_FILE` | (unset) | A file (outside the sandbox) with the exact lines the program must print: `DONE` is refused until the latest run printed them, and the refusal names the wrong fields. |
+| `AGENT_TEST_FILE` | (unset) | A test file inside the sandbox (for example `test_contract.py`). During an agent run it is read-only (no tool and no script can change it), and `DONE` is refused until a run of it passes (exit 0) after the last change to any `.py` file. |
 
 ## Platforms
 

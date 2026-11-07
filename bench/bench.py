@@ -119,6 +119,11 @@ class Task:
         self.fixtures = d / "files"
         # optional (update 25): the lines the program must print; the tool then refuses DONE until a run prints them
         self.expect = d / "expected_output.txt" if (d / "expected_output.txt").is_file() else None
+        # optional (W10): a test file among the task's files; the tool keeps it read-only and refuses DONE until a
+        # run of it passes after the last code change
+        self.test_file = self.cfg.get("test_file") or None
+        if self.test_file and not (self.fixtures / self.test_file).is_file():
+            raise SystemExit(f"task {self.name}: test_file {self.test_file} is not in its files/ folder")
 
 
 def all_tasks() -> dict:
@@ -214,6 +219,9 @@ def judge(task: Task, outfile: Path, tool=None):
         local = Path(d) / outfile.name
         for f in files:
             shutil.copy(f, Path(d) / f.name)
+        # W10: the task's test file goes along as data, so the verifier can check it was not changed (never run here)
+        if task.test_file and (outfile.parent / task.test_file).is_file():
+            shutil.copy(outfile.parent / task.test_file, Path(d) / task.test_file)
         try:
             p = _run_verifier(task, local, d, tool)
             text = (p.stdout or "") + (p.stderr or "")
@@ -300,6 +308,7 @@ def parse_log(log: str, transcript: dict) -> dict:
         "ended": ended,
         "refused": len(re.findall(r"^tool>\s+REFUSED", log, re.M)),
         "expect_blocks": len(re.findall(r"^tool>\s+REFUSED: cannot accept DONE yet:.*different from the expected output", log, re.M)),
+        "test_blocks": len(re.findall(r"^tool>\s+REFUSED: cannot accept DONE yet:.*(?:the task's tests|after the task's tests)", log, re.M)),
         "gen_tok_s": round(sum(speeds) / len(speeds), 2) if speeds else None,
     }
 
@@ -317,6 +326,9 @@ def run_one(sess: Path, task: Task, i: int, tools: Path, live: bool, keep: bool,
     env.pop("AGENT_EXPECT_FILE", None)          # only a task's own expected_output.txt may switch the gate on
     if task.expect:
         env["AGENT_EXPECT_FILE"] = str(task.expect)
+    env.pop("AGENT_TEST_FILE", None)            # W10: only a task's own test_file switches the test gate on
+    if task.test_file:
+        env["AGENT_TEST_FILE"] = task.test_file
     cmd = [sys.executable, str(tools / "sandbox_tool.py"), "--agent", task.prompt]
     t0, lines = time.time(), []
     proc = subprocess.Popen(cmd, cwd=work, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -396,6 +408,8 @@ def build_report(sess: Path, detail: str = "all") -> str:
         w(f"  task {name:12s} prompt {t['prompt_sha']}  verifier {t['verify_sha']}  ({t['title']})")
         if t.get("expect_sha"):
             w(f"       {'':12s} EXPECTED-OUTPUT GATE ON (expected_output {t['expect_sha']}): DONE needs a run that prints it")
+        if t.get("test_sha"):
+            w(f"       {'':12s} TEST GATE ON ({t['test_file']} {t['test_sha']}): DONE needs a passing run of it after the last change")
     w("")
     w("SUMMARY (one row per task)")
     w(f"  {'task':12s} {'pass':>9s} {'false-DONE':>10s} {'steps':>6s} {'secs':>6s} {'tok/s':>6s} {'refused':>8s}")
@@ -431,6 +445,11 @@ def build_report(sess: Path, detail: str = "all") -> str:
         hit = [r for r in rs if r.get("expect_blocks")]
         w(f"EXPECTED-OUTPUT GATE ({n})  refused a DONE on wrong output {sum(r.get('expect_blocks', 0) for r in rs)} time(s), "
           f"in {len(hit)} of {len(rs)} run(s)" + (f": runs {', '.join(str(r['run']) for r in hit)}" if hit else ""))
+    for n in [n for n, t in meta.get("tasks", {}).items() if t.get("test_sha")]:
+        rs = [r for r in results if r["task"] == n]
+        hit = [r for r in rs if r.get("test_blocks")]
+        w(f"TEST GATE ({n})  refused a DONE because the task's tests had not passed {sum(r.get('test_blocks', 0) for r in rs)} "
+          f"time(s), in {len(hit)} of {len(rs)} run(s)" + (f": runs {', '.join(str(r['run']) for r in hit)}" if hit else ""))
     notes = read(sess / "notes.md").strip()
     w("")
     w("YOUR NOTES (python bench.py note \"text\")")
@@ -444,7 +463,8 @@ def build_report(sess: Path, detail: str = "all") -> str:
         w(f"RUN {r['task']}/{r['run']}   {r['verify']} ({r['passed']}/{r['total']})   steps {r['steps']}   "
           f"{r['seconds']}s   ended: {r['ended']}" + ("   ** CLAIMED DONE BUT FAILED **" if r["claimed_false"] else ""))
         w("commands used: " + (", ".join(f"{k} x{v}" for k, v in r["cmds"].items()) or "none") +
-          f"   refused: {r['refused']}" + (f"   expected-output gate refused DONE: {r['expect_blocks']}" if r.get("expect_blocks") else ""))
+          f"   refused: {r['refused']}" + (f"   expected-output gate refused DONE: {r['expect_blocks']}" if r.get("expect_blocks") else "")
+          + (f"   test gate refused DONE: {r['test_blocks']}" if r.get("test_blocks") else ""))
         rn = read(rd / "notes.md").strip()
         if rn:
             w("your notes on this run:\n" + rn)
@@ -522,7 +542,9 @@ def cmd_run(a):
             "python": sys.version.split()[0], "tool_sha": sha((tools / "sandbox_tool.py").read_bytes()),
             "system_sha": sha(getattr(tool, "SYSTEM", "")), "runs_per_task": a.n, "tools_dir": str(tools),
             "tasks": {t.name: {"prompt_sha": sha(t.prompt), "verify_sha": sha(read(t.verify)), "title": t.title,
-                               "expect_sha": sha(read(t.expect)) if t.expect else None} for t in tasks}}
+                               "expect_sha": sha(read(t.expect)) if t.expect else None,
+                               "test_file": t.test_file,
+                               "test_sha": sha(read(t.fixtures / t.test_file)) if t.test_file else None} for t in tasks}}
     (sess / "meta.json").write_text(json.dumps(meta, indent=1))
     if a.note:
         add_note(sess / "notes.md", a.note)

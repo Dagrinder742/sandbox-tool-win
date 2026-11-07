@@ -73,3 +73,18 @@ printed those lines (the tool's own run of `main.py` counts), naming the first w
 has one; `pipeline_omni` and `bugfix` stay without it as baselines. The report says when the gate is ON and counts
 how often it refused a DONE on wrong output, so a PASS that needed the gate is visible. A run with the gate is not
 comparable to one without it: it measures "reaches the known target", not "knows on its own when it is done".
+
+**Test gate** (W10): a task may name a test file in `task.json` (`"test_file": "test_contract.py"`); the file must
+be in its `files/` folder. The bench passes it to the tool as `AGENT_TEST_FILE`: during the run the file is
+read-only, and DONE is refused until a run of it passes after the last code change. The report shows the test file's
+hash and counts how often the gate refused a DONE. The verifier is handed a copy of the test file, so it can check it
+was not changed. The visible test is NOT the verifier: it uses its own data, and the hidden checks still catch what
+it does not test.
+
+`pipeline_omni_v3`: `pipeline_omni_v2` plus `test_contract.py` (5 rules: which rows `clean()` keeps, prices become
+floats, no rows gives no rows, `subtotal()`, `average_order([])`) and the test gate; the prompt adds one paragraph and
+a step 4 ("run test_contract.py, fix what FAILs"); `max_steps` 16 (v2: 14) for the extra test runs; the verifier adds
+"test_contract.py is unchanged" (14 checks). Made because in 30 of 30 runs since W8 the model put the price cast in
+`calc.py`, where the TypeError shows, and the expected output could not tell (it is the same either way): the visible
+test fails on exactly that rule and names `ingest.py`. Not comparable with v2 (different prompt and gate); compare v3
+runs with each other.

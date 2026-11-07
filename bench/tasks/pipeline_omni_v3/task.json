@@ -1,0 +1,1 @@
+{"title": "pipeline_omni v3: v2 + a visible test file (test_contract.py) and the test gate", "output": "main.py", "outputs": ["calc.py", "ingest.py"], "difficulty": 5, "max_steps": 16, "test_file": "test_contract.py"}

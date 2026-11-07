@@ -1751,6 +1751,18 @@ try:
         ans, out, seen = play(["CMD: run_python evil.py", "DONE: x"])
         check((SB / "tt.py").read_text() == _TT, "testgate", "a script run with run_python cannot overwrite the test file", out[-160:])
         (SB / "evil.py").unlink()
+        _tg_setup(_TM_GOOD)
+        (SB / "trun.py").write_text('from tm import price\nprint(price({"price": "2"}))\n')
+        _ex = ROOT / "tg_expected.txt"; _ex.write_text("2.0\n")
+        os.environ["AGENT_EXPECT_FILE"] = str(_ex)
+        try:
+            ans, out, seen = play(["CMD: run_python trun.py", "CMD: run_python tt.py", "DONE: both gates agree"])
+        finally:
+            os.environ.pop("AGENT_EXPECT_FILE", None); _ex.unlink()
+        check(ans == "both gates agree", "testgate",
+              "W10.1 with BOTH gates: right output, then a passing test run -> DONE accepted (the test's own output is "
+              "not taken as the program's output)", out[-220:])
+        (SB / "trun.py").unlink()
         check(not T.READ_ONLY, "testgate", "the test file is read-only only during the run that uses it (cleared after)")
         _r = T.run("patch_file tt.py", "<<<<<<< SEARCH\nok = \n=======\nok2 = \n>>>>>>> REPLACE\n")
         check(not _r.startswith("REFUSED") or "task's test file" not in _r, "testgate",

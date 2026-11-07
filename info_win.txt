@@ -489,6 +489,39 @@ HOW TO MEASURE: pipeline_omni_v3 -n 10 (a NEW baseline: not comparable with v2),
  float" is followed by an edit of ingest.py, test-gate refusals, step-limit endings (16 steps). n=10 = a screen.
 UNVERIFIED: everything about the model's behaviour; the gate on a real Windows run (the tests ran on Linux).
 
+W10 RESULT (2026-11-07, Casey, one terminal): report 20261107-1041-win-w10-omni3, tool_sha 6aeb8ed1c6, system_sha
+ 1ce60c3cc5, pipeline_omni_v3 prompt ec301b3760, verifier c92d987576, test 1cd995d2d8. 0/10 PASS, 0 false-DONE,
+ 12.0 steps, 408 s per run, 25 refusals; ended: 5 step limit (16), 4 aborted, 1 DONE blocked 3 times.
+ BENCH BUG (W10, fixed in W10.1): "test_contract.py is unchanged" failed in ALL 10 runs with "test_contract.py is
+ missing": run_one copies only the task's outputs into the run folder that judge() reads, and W10 copied the test
+ file from that folder. The model never touched the test (0 commands on it, 0 refusals). Corrected scores (+1 each):
+ runs 1-10 = 10, 12, 13, 9, 13, 9, 13, 8, 11, 8 of 14; still 0/10 (every run failed other checks). My W10 bench
+ check judged a selftest folder, which already holds the file, so it never saw the real path.
+WHAT THE MODEL DID: it ran test_contract.py in only 3 of 10 runs (2, 6, 7). In those 3, it saw "FAIL ingest.py:
+ clean() turns every kept price into a float" and its next edits went to ingest.py every time (run 2 put the cast
+ into clean()). In the other 7 it never ran the test, even after the test gate refused DONE with "run_python
+ test_contract.py" in the message (runs 1, 3, 5): it ran calc.py and main.py instead and then wrote "test_contract.py
+ passes all the tests" without running it. Every such DONE was refused (false-DONE 0). Run 9 put the cast in ingest.py
+ without running the test. So: the visible test steers the model when it is seen (3/3), but the model does not
+ follow the instruction to run it.
+
+W10.1 (2026-11-07) FROM CLAUDE: TWO W10 BUGS FIXED (no prompt change; system_sha 1ce60c3cc5).
+ 1. bench: run_one also saves the test file (as the run left it) into the run folder, so the verifier's "unchanged"
+    check sees it. New whole-run test (fake model through `bench.py run -t pipeline_omni_v3`): it FAILED before the
+    fix with the same "missing" result as Casey's report, and passes after (PASS 14/14).
+ 2. tool: GATE CONFLICT, found by that whole-run test: the expected-output gate judged the LATEST run, so after a
+    passing run of test_contract.py it compared the test's PASS lines with the expected output and refused DONE
+    ("line 1 is 'PASS ingest.py: ...' but must be 'orders=3 ...'"). A run of the test file no longer counts as the
+    program's output. Not seen in Casey's report (no run reached a passing test), but any good run would have hit it.
+ Version 0.1.0+win.10.1, tool_sha 5febd5eddb. Tests: main suite 541 ALL OK (+1: both gates on, right output then a
+ passing test -> DONE accepted); test_bench ALL OK (+2 whole-run checks); Python 3.10-3.13, cp1252, RUN_PYTHON=0 ALL
+ OK; selftest ALL VERIFIERS BEHAVE; --selfcheck 26 ok. Both fixes broken on scratch copies: each makes its test FAIL.
+ Comparability: W10's v3 runs are comparable with W10.1 runs except that they could never have passed (bug 1) and a
+ passing test followed by DONE would have been refused (bug 2). Treat win-W10.1-omni3 as the real v3 baseline.
+NEXT CANDIDATE (not built, Casey to choose): when the test gate refuses DONE, the tool runs the test itself and shows
+ its PASS/FAIL lines in the refusal (like update 24 runs main.py for a module, and replace_def reads an unread file).
+ That gives the model the FAIL line it otherwise never asks for. Model-visible, so measured on its own after W10.1.
+
 PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
  --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the
  tool; display only, the model always gets the full output, so nothing is comparable-breaking). Side effect: the

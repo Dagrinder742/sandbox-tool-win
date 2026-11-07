@@ -57,7 +57,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-__version__ = "0.1.0+win.10"
+__version__ = "0.1.0+win.10.1"
 
 
 def _default_sandbox() -> Path:
@@ -2549,8 +2549,10 @@ def _agent_loop(task: str, max_steps: int, msgs: list) -> str:
                 elif len(tops) > 1:
                     redirect = (f"\n({target} only defines code, so running it proves nothing. Run a file that "
                                 f"uses it: {', '.join(tops[:5])}.)")
-            if name == "run_python" and is_py and judged.startswith("[exit"):
-                last_run = judged   # update 25: what the program printed last (main.py's run when the tool ran it)
+            if (name == "run_python" and is_py and judged.startswith("[exit")
+                    and not (test_name and (auto_top or target) == test_name)):
+                last_run = judged   # update 25: what the program printed last (main.py's run when the tool ran it);
+                                    # W10.1: a run of the TEST file is not the program's output (the gates must agree)
 
             if result.startswith(("REFUSED:", "ERROR:")):
                 consecutive_failures += 1

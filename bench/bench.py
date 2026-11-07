@@ -354,6 +354,8 @@ def run_one(sess: Path, task: Task, i: int, tools: Path, live: bool, keep: bool,
         for name in task.outputs:             # the file(s) the verifier judges, as the model left them
             if (work / name).is_file():
                 shutil.copy(work / name, rd / name)
+        if task.test_file and (work / task.test_file).is_file():   # W10.1: the test file as the run left it, so the
+            shutil.copy(work / task.test_file, rd / task.test_file)  # verifier can check it is unchanged
         for extra in work.glob("*"):          # keep any other file the model made (small ones only)
             if extra.is_file() and extra.name not in (*task.outputs, "file_index.txt") and extra.stat().st_size < 200_000 \
                     and not (task.fixtures / extra.name).exists():

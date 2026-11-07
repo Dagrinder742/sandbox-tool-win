@@ -60,7 +60,17 @@ class H(http.server.BaseHTTPRequestHandler):
         step = sum(m["role"] == "assistant" for m in msgs)
         P = lambda fn, code: [f"NOTE: write it\nCMD: write_file {fn}\n```python\n{code}```",
                               f"NOTE: run it\nCMD: run_python {fn}", "NOTE: finished\nDONE: it works"]
-        if "Your first reply must be only" in first:   # pipeline_omni_v2: says DONE too early on orders=4 (zip24-omni)
+        if "test_contract.py" in first:               # pipeline_omni_v3 (W10): both gates refuse once, then the test passes
+            RD = lambda f, n, code: f"CMD: replace_def {f} {n}\n```python\n{code}\n```"
+            plan = ["CMD: run_python main.py",
+                    RD("ingest.py", "DataIngester.clean", PO_CLEAN.replace("> 0", ">= 0")) + "\n"
+                    + RD("calc.py", "average_order", PO_AVG) + "\nCMD: run_python main.py",
+                    "DONE: it works",
+                    RD("ingest.py", "DataIngester.clean", PO_CLEAN) + "\nCMD: run_python main.py",
+                    "DONE: prints the two expected lines",
+                    "NOTE: the gate wants the tests\nCMD: run_python test_contract.py",
+                    "DONE: tests pass and the output is right"]
+        elif "Your first reply must be only" in first:   # pipeline_omni_v2: says DONE too early on orders=4 (zip24-omni)
             RD = lambda f, n, code: f"CMD: replace_def {f} {n}\n```python\n{code}\n```"
             plan = ["CMD: run_python main.py",
                     RD("ingest.py", "DataIngester.clean", PO_CLEAN.replace("> 0", ">= 0")) + "\n"
@@ -345,6 +355,19 @@ v, text, p, n = bm.judge(bm.all_tasks()["wordcount"], hang, None)
 check(v == "FAIL", "a hanging file cannot hang the verifier", text[:150])
 
 # ---- W10: the test gate in the bench ----
+# a WHOLE run (W10.1): the run folder must hold the test file when the verifier is called (it was missing in every
+# real W10 run because the earlier checks only judged selftest folders, which already contain it)
+r = bench("run", "-t", "pipeline_omni_v3", "-n", "1", "--label", "Omni3 Stub")
+_s3 = sorted((kit / "runs").glob("*omni3-stub*"))
+_r3 = json.loads(next(_s3[0].glob("pipeline_omni_v3/run_1/result.json")).read_text()) if _s3 else {}
+check(r.returncode == 0 and _r3.get("verify") == "PASS" and _r3.get("passed") == _r3.get("total") == 14
+      and _r3.get("expect_blocks") == 1 and _r3.get("test_blocks") == 2 and _r3.get("ended") == "done",
+      "W10.1 a whole pipeline_omni_v3 run: the first DONE is refused by both gates, the second by the test gate, "
+      "the test then passes (and its output does NOT count as the program's output): verified PASS 14/14",
+      str({k: _r3.get(k) for k in ("verify", "passed", "total", "expect_blocks", "test_blocks", "ended", "failed_checks")})[:300])
+_rep3 = (kit / "reports" / f"{_s3[0].name}.txt").read_text() if _s3 else ""
+check("TEST GATE ON (test_contract.py" in _rep3 and "refused a DONE because the task's tests had not passed 2 time(s)" in _rep3,
+      "W10.1 the report shows the test gate and counts its refusal", _rep3[:200])
 _v3 = bm.all_tasks()["pipeline_omni_v3"]
 check(_v3.test_file == "test_contract.py" and _v3.max_steps == 16 and bm.all_tasks()["pipeline_omni_v2"].test_file is None,
       "W10 pipeline_omni_v3 declares test_contract.py as its test file (v2 has none, so v2 runs are unchanged)")

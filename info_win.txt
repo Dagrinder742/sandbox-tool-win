@@ -565,6 +565,66 @@ HOW TO MEASURE: pipeline_omni_v3 -n 10 against win-W10.1-omni3 (same prompt ec30
 UNVERIFIED: the model's behaviour. Risk to watch: the new refusal costs a step; if the model keeps sending
  `def clean(rows):` it trades one refusal for another.
 
+W11 RESULT (2026-11-07, Casey): report 20261107-1714-win-w11-omni3, tool_sha caa623d218, system_sha 1ce60c3cc5, v3
+ prompt ec301b3760, verifier c92d987576 (comparable with win-W10.1-omni3). 0/10 PASS, 0 false-DONE, 14.9 steps, 489 s,
+ 29 refusals; 9 step limit (16), 1 aborted. Best runs: 7 (13/14), 5 and 8 (12/14).
+WHAT W11 CHANGED: edits now land in clean() in 9 of 10 runs (W10.1: 0 of 10). Final clean() per run: price really
+ converted and stored in 2 (runs 4, 8; W10.1: 0); float(price) used only as a TEST inside the filter, price left a
+ string, in 4 (5, 6, 9, 10); the filter fully right (qty > 0) in 1 (7); clean() broken (assigns self.rows, returns
+ None) in 3 (6, 9, 10); run 2 never changed it. "does not take self first" refused 2 edits. The limit is now what the
+ 3B model writes inside the method, and the 16-step budget (9 of 10 runs ran out while still iterating).
+VERIFIER FLAW FOUND (mine; in v2 AND v3): "clean() returns price as a float" checks the LIST of kept prices
+ (eq([...], [2.25, 10.0])), so a wrong filter fails it too: runs 4 and 8 returned all floats ([2.25, 5.0, 10.0]) and
+ still failed it. No PASS count was ever affected (a wrong filter also fails the filter check), but per-check counts
+ for the price check were inflated in every omni report. The W8-W10 finding "the cast went into calc.py" stands (it
+ came from the code the model wrote, not from this check). Fix proposed as a bench-only update (new verifier hash,
+ PASS counts unchanged).
+RISK NOTED: W8-W11 were all measured on pipeline_omni. The rest of the bank (csv_total, wordcount, bugfix, skill_v42,
+ skill_v4) has not been run on the Windows line since W9-W11 (skill_v4 last on W9). Running it is the check that the
+ changes help, or at least do not hurt, in general.
+
+GEMINI ON v3 (2026-11-07, Casey, BACKEND=gemini, model gemini-3.8-flash, tool 5febd5eddb = W10.1, session
+ 20261107-1608-win-w10-1-omni3-gemini, terminal output only, not a full report): runs 1 and 2 verified PASS 14/14,
+ the FIRST passes ever on any pipeline_omni version. Gemini read ingest.py, used DataIngester.clean, converted the
+ price on a copy of the row (new_row["price"] = float(r["price"])), fixed average_order, and main.py printed exactly
+ the expected lines. So the tool, gates and verifier do not block this task: the 3B model's skill does.
+ NOT CLEAN: neither run reached DONE or ran test_contract.py. Run 2 stopped on the free-tier quota (429
+ RESOURCE_EXHAUSTED: 20 requests per day for gemini-3.8-flash, about 2 runs a day). Run 1 took 7200 s (the bench's
+ BENCH_RUN_TIMEOUT) and ended "unknown" after 3 "Gemini busy" retries: something waited far longer than
+ LLAMA_TIMEOUT; possibly a Gemini request without a working timeout. UNVERIFIED, to check before any long Gemini
+ campaign. Runs 3-10 of that session were only quota retries (Casey told to stop it).
+
+W11 BANK (2026-11-07, Casey): report 20261107-1941-win-w11-bank, tool_sha caa623d218, system_sha 1ce60c3cc5, n=5.
+ wordcount 5/5, skill_v4 5/5, bugfix 4/5 (1 false-DONE), csv_total 4/5, stack 4/5 (1 false-DONE), skill_v42 1/5
+ (4 false-DONE). TOTAL 23/30.
+ - No hole in the DONE gate: the 2-step runs (stack/5, bugfix/2-5) batched write/replace + run_python + DONE in one
+   reply; the run happened. stack/5 failed because its demo printed nothing (exit 0, no output; stack has no
+   expected-output gate).
+ - BENCH REPORT BUG: "commands used" counts only the FIRST command of each reply (bugfix/2 sent 2 replace_def + 1
+   run_python, shown as "replace_def x1"). Earlier claims about replace_lines use came from searching all CMD: lines,
+   so they stand. Fix in W11.1.
+ - replace_lines was used in 2 bank runs, both harmful: bugfix/1 tried to hard-code the expected output
+   (`print("0.0")` over line 16; the stale-number guard refused it twice); csv_total/3 "replaced" `import csv` with
+   itself; its refusals (unread, then no-op) helped make 3 in a row and the run was aborted. Used in 2 of 50 runs
+   since W9, never helpfully.
+ - skill_v42 1/5: failures are contract details (metrics not updated, a stage not printed, energy limit ignored),
+   each claimed DONE. The old 93/100 is from the Linux line on an older build: NOT comparable. Possible W8 cost
+   (the Stock example was added for the skill tasks); needs an A/B: skill_v42 -n 10 with the W7 tool (--tools) vs
+   the current tool, same machine, same day.
+
+W11.1 (2026-11-07) FROM CLAUDE: TERMINAL COLORS IN THE BENCH'S --live OUTPUT (Casey: "NOTE yellow pass green fail red
+ cmd magenta"). bench.py only; the tool file is UNCHANGED (tool_sha caa623d218), so no result can change.
+ colorize(): NOTE yellow, CMD magenta, DONE / final> cyan, [exit 0] and PASS green, [exit N], REFUSED, ERROR,
+ tracebacks, FAIL and "CLAIMED DONE BUT FAILED" red, [expect] [test] [check] [info] blue, [llm] / fences / preview cuts
+ dim, the [k/n] run header bold. Only on a real terminal; NO_COLOR or BENCH_COLOR=0 off, BENCH_COLOR=1 forced; on
+ Windows the console's virtual-terminal mode is switched on (older consoles). The run.log and the report are always
+ plain text (colors are added only when a line is written to the screen).
+ Tests: test_bench +4 (each color; code lines and colors-off unchanged; BENCH_COLOR=1 --live colors the screen but not
+ the report or run.log; piped output gets none). 2 breaks caught (colors saved into run.log: 7 FAIL; NOTE not yellow:
+ 1). Python 3.10 and 3.13 ALL OK; main suite unchanged ALL OK. bench/README.md: the run row documents it.
+ Still pending for a later bench-only update: verifier price-check fix, "commands used" counting every command of a
+ reply, Gemini request timeout and no retry on the daily quota.
+
 PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
  --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the
  tool; display only, the model always gets the full output, so nothing is comparable-breaking). Side effect: the

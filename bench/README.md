@@ -27,7 +27,7 @@ prompt and each task's prompt and verifier. When a run finishes you get one repo
 
 | Command | |
 |---|---|
-| `run -t <tasks> -n N --label X --note "..."` | Run, judge, capture, write the report. `--live` echoes the agent's output. |
+| `run -t <tasks> -n N --label X --note "..."` | Run, judge, capture, write the report. `--live` echoes the agent's output, in color on a terminal (NOTE yellow, CMD magenta, DONE cyan, PASS / `[exit 0]` green, FAIL / errors / REFUSED red, tool notes blue). `BENCH_COLOR=0` turns colors off, `BENCH_COLOR=1` forces them; `NO_COLOR` is respected. Reports and `run.log` are always plain text. |
 | `note "text" [--run task/3]` | Add a note to the latest session (or one run), even while a run is going. |
 | `report [session] [--detail all\|fail\|none]` | Rebuild the report (picks up new notes). Edit `notes.md` files, never `report.txt`. |
 | `show task/3 [session]` | Print one run: log, file, verify log. |

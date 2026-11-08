@@ -313,6 +313,65 @@ def parse_log(log: str, transcript: dict) -> dict:
     }
 
 
+# ---- terminal colors (W11.1, display only: the run.log and the report stay plain text) ----
+_C = {"yellow": "33", "magenta": "35", "cyan": "36", "green": "32", "red": "31", "blue": "34", "dim": "2", "bold": "1"}
+_COLOR_RULES = [   # (regex on the line after any "    | " prefix, color); the first match wins
+    (r"^(model> )?NOTE:", "yellow"),
+    (r"^(model> )?CMD:", "magenta"),
+    (r"^(model> )?DONE|^final>", "cyan"),
+    (r"^tool>\s+\[exit 0\]", "green"),
+    (r"^tool>\s+(\[exit [^0]|\[exit \d\d|REFUSED|ERROR)|^(REFUSED|ERROR)\b", "red"),
+    (r"^\s*(Traceback|\w+(Error|Exception):)|^\s*FAIL\b|CLAIMED DONE BUT FAILED", "red"),
+    (r"^\s*PASS\b|^\s*\d+ of \d+ tests passed", "green"),
+    (r"^\[(expect|test|check|info)\]", "blue"),
+    (r"^\[llm\]|^```|^\.\.\. \[\d+ more lines", "dim"),
+    (r"^\[\d+/\d+\] ", "bold"),
+]
+
+
+def _color_on() -> bool:
+    """Colors only on a real terminal; NO_COLOR or BENCH_COLOR=0 turns them off, BENCH_COLOR=1 forces them on."""
+    force = os.environ.get("BENCH_COLOR", "")
+    if force in ("0", "1"):
+        return force == "1"
+    if os.environ.get("NO_COLOR") or not getattr(sys.stdout, "isatty", lambda: False)():
+        return False
+    if os.name == "nt":   # older Windows consoles need virtual-terminal mode switched on
+        try:
+            import ctypes
+            k = ctypes.windll.kernel32
+            h = k.GetStdHandle(-11)
+            mode = ctypes.c_uint32()
+            if not k.GetConsoleMode(h, ctypes.byref(mode)) or not k.SetConsoleMode(h, mode.value | 0x0004):
+                return False
+        except Exception:
+            return False
+    return True
+
+
+COLOR = None   # decided on first use
+
+
+def colorize(line: str, on: bool = None) -> str:
+    """Wrap one printed line in the color its kind gets (NOTE yellow, CMD magenta, PASS green, FAIL red, ...)."""
+    global COLOR
+    if on is None:
+        if COLOR is None:
+            COLOR = _color_on()
+        on = COLOR
+    if not on:
+        return line
+    nl = "\n" if line.endswith("\n") else ""
+    body = line[:-1] if nl else line
+    pre = ""
+    if body.startswith("    | "):
+        pre, body = "    | ", body[6:]
+    for rx, name in _COLOR_RULES:
+        if re.search(rx, body):
+            return f"{pre}\033[{_C[name]}m{body}\033[0m{nl}"
+    return line
+
+
 def run_one(sess: Path, task: Task, i: int, tools: Path, live: bool, keep: bool, tool) -> dict:
     rd = sess / task.name / f"run_{i}"
     rd.mkdir(parents=True, exist_ok=True)
@@ -339,7 +398,7 @@ def run_one(sess: Path, task: Task, i: int, tools: Path, live: bool, keep: bool,
         for line in proc.stdout:
             lines.append(line)
             if live:
-                sys.stdout.write("    | " + line)
+                sys.stdout.write(colorize("    | " + line))
                 sys.stdout.flush()
         proc.wait()
     except KeyboardInterrupt:
@@ -557,12 +616,12 @@ def cmd_run(a):
     try:
         for t in tasks:
             for i in range(1, a.n + 1):
-                print(f"[{done + 1}/{len(tasks) * a.n}] {t.name} run {i} ...", flush=True)
+                print(colorize(f"[{done + 1}/{len(tasks) * a.n}] {t.name} run {i} ..."), flush=True)
                 r = run_one(sess, t, i, tools, a.live, a.keep_work, tool)
                 done += 1
                 fails += r["verify"] != "PASS"
-                print(f"    {r['verify']} ({r['passed']}/{r['total']})  steps {r['steps']}  {r['seconds']}s  "
-                      f"ended: {r['ended']}" + ("   ** CLAIMED DONE BUT FAILED **" if r["claimed_false"] else ""), flush=True)
+                print(colorize(f"    {r['verify']} ({r['passed']}/{r['total']})  steps {r['steps']}  {r['seconds']}s  "
+                      f"ended: {r['ended']}" + ("   ** CLAIMED DONE BUT FAILED **" if r["claimed_false"] else "")), flush=True)
     except KeyboardInterrupt:
         print("\ninterrupted: saving what was captured so far")
     meta["finished"] = datetime.datetime.now().isoformat(timespec="seconds")

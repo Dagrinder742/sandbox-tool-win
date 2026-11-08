@@ -386,6 +386,27 @@ _src = (kit / "bench.py").read_text()
 check('env.pop("AGENT_TEST_FILE", None)' in _src and 'env["AGENT_TEST_FILE"] = task.test_file' in _src,
       "W10 a run passes AGENT_TEST_FILE only for a task that declares one (an inherited value is removed)")
 
+# ---- W11.1: terminal colors (display only) ----
+_cases = {"    | model> NOTE: x\n": "33", "    | CMD: run_python a.py\n": "35", "    | model> DONE: ok\n": "36",
+          "    | tool>  [exit 0]\n": "32", "    | tool>  [exit 1]\n": "31", "    | tool>  REFUSED: no\n": "31",
+          "    | TypeError: bad\n": "31", "    | PASS rule\n": "32", "    | FAIL rule: x\n": "31",
+          "    | [test] DONE needs\n": "34", "    | [llm] 3s\n": "2"}
+check(all(bm.colorize(k, True) == f"    | \033[{c}m{k[6:-1]}\033[0m\n" for k, c in _cases.items()),
+      "W11.1 colors: NOTE yellow, CMD magenta, DONE cyan, exit 0 / PASS green, exit 1 / REFUSED / errors / FAIL red, notes blue, [llm] dim")
+check(bm.colorize("    | def f():\n", True) == "    | def f():\n" and all(bm.colorize(k, False) == k for k in _cases),
+      "W11.1 code lines stay plain, and with colors off every line is unchanged")
+_e2 = dict(env, BENCH_COLOR="1")
+r = subprocess.run([sys.executable, str(kit / "bench.py"), "run", "-t", "stack", "-n", "1", "--label", "Color Stub", "--live"],
+                   capture_output=True, text=True, env=_e2, timeout=300)
+_sc = sorted((kit / "runs").glob("*color-stub*"))
+_repc = (kit / "reports" / f"{_sc[0].name}.txt").read_text() if _sc else "missing"
+_logc = next(_sc[0].glob("stack/run_1/run.log")).read_text() if _sc else "missing"
+check(r.returncode == 0 and "\033[" in r.stdout and "\033[" not in _repc and "\033[" not in _logc and "model>" in _repc,
+      "W11.1 BENCH_COLOR=1 --live: the screen gets colors, the report and run.log stay plain text", r.stdout[-200:] + r.stderr[-200:])
+r = bench("run", "-t", "stack", "-n", "1", "--label", "Nocolor Stub", "--live")
+check(r.returncode == 0 and "\033[" not in r.stdout and "model>" in r.stdout,
+      "W11.1 output to a pipe or file (not a terminal) gets no colors", r.stdout[-200:])
+
 if os.environ.get("KEEP"):
     print("kept:", tmp)
 else:

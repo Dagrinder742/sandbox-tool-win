@@ -625,6 +625,24 @@ W11.1 (2026-11-07) FROM CLAUDE: TERMINAL COLORS IN THE BENCH'S --live OUTPUT (Ca
  Still pending for a later bench-only update: verifier price-check fix, "commands used" counting every command of a
  reply, Gemini request timeout and no retry on the daily quota.
 
+SKILL_V42 A/B (2026-11-07, Casey, same machine, same evening, same bench, n=10 each):
+ W7 tool (6e57f76942, system_sha 000c5f86b8, WITH the Stock example)  10/10 PASS, 0 false-DONE   (report 20261107-2220)
+ W11 tool (caa623d218, system_sha 1ce60c3cc5, no example)              4/10 PASS, 6 false-DONE   (report 20261107-2307)
+ Fisher p=0.011. All 6 W11 failures are ONE check: "perceive() contract: state['metrics'] was not updated" (the model
+ builds and returns metrics but never writes self.state["metrics"] = metrics). The Stock example showed exactly that
+ pattern (self.state["items"] = ...). So removing it (W8) most likely cost skill_v42 its state assignment.
+ CAUTION: W7 -> W11 is TWO prompt changes (W8 removed the example, W9 added the replace_lines text). To isolate: one
+ more arm on the W8 build (system_sha 105cbe1186: no example, no replace_lines text).
+ FIX IDEA (not built): a one-line CODE RULE with no code to copy ("when the task says a method keeps a value in state,
+ assign it: self.state[...] = value"); measure on skill_v42 AND pipeline_omni_v3 (the example leaked into omni bug
+ fixes in 5/10 runs, so any fix must not bring that back).
+W11.1 ON WINDOWS: bench/test_bench.py failed "W11.1 output to a pipe or file (not a terminal) gets no colors" (color
+ codes seen). CONFIRMED: Casey's $PROFILE line 25 sets $env:BENCH_COLOR="1"; the old test fails the same way here with
+ BENCH_COLOR=1. FIXED (W11.1b, tests only): bench/test_bench.py drops BENCH_COLOR and NO_COLOR from its base
+ environment, so the color checks decide for themselves. ALL OK with BENCH_COLOR=1, NO_COLOR=1 and neither. Advice
+ to Casey: the profile line is not needed (colors switch on by themselves on a terminal) and forces color codes into
+ piped output such as | Select-String.
+
 PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
  --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the
  tool; display only, the model always gets the full output, so nothing is comparable-breaking). Side effect: the

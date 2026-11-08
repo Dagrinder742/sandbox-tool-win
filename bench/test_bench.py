@@ -120,6 +120,8 @@ tools = tmp / "tools"
 tools.mkdir()
 shutil.copy(TOOLS / "sandbox_tool.py", tools)
 env = dict(os.environ, LLAMA_URL=URL, BACKEND="local", LLAMA_STREAM="0", TOOLS=str(tools))
+for _k in ("BENCH_COLOR", "NO_COLOR"):   # W11.1: the tests decide colors themselves (a value in the user's
+    env.pop(_k, None)                     # shell or $PROFILE made the pipe check fail on Windows)
 env.pop("RUN_PYTHON", None)
 
 

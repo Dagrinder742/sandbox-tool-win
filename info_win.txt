@@ -633,6 +633,14 @@ SKILL_V42 A/B (2026-11-07, Casey, same machine, same evening, same bench, n=10 e
  pattern (self.state["items"] = ...). So removing it (W8) most likely cost skill_v42 its state assignment.
  CAUTION: W7 -> W11 is TWO prompt changes (W8 removed the example, W9 added the replace_lines text). To isolate: one
  more arm on the W8 build (system_sha 105cbe1186: no example, no replace_lines text).
+ THIRD ARM (2026-11-08, report 20261108-0026-win-ab-skill42-w8): W8 tool 4c84b6c25a, system_sha 105cbe1186: 5/10 PASS,
+ 4 false-DONE, all 5 failures the same "state['metrics'] was not updated". W8 (5) ~ W11 (4); W7 10 vs W8 5: Fisher
+ p~0.03. CONCLUSION: the cause is the Stock example's removal (W8), not W9's replace_lines text. Trade-off: with the
+ example skill_v42 is 10/10 but omni bug fixes copy its code (5/10 runs, win-W6-omni2); without it omni is clean but
+ skill_v42 forgets the state assignment about half the time.
+ W12 PROPOSAL (not built, awaiting Casey): one CODE RULE line, no code to copy: "If the task says a method keeps,
+ stores or updates a value in self.state, write that assignment in that method (self.state["<key>"] = <value>)
+ before it returns." Measure skill_v42 (target), pipeline_omni_v3 (leak check), skill_v4 (regression), n=10 each.
  FIX IDEA (not built): a one-line CODE RULE with no code to copy ("when the task says a method keeps a value in state,
  assign it: self.state[...] = value"); measure on skill_v42 AND pipeline_omni_v3 (the example leaked into omni bug
  fixes in 5/10 runs, so any fix must not bring that back).
@@ -642,6 +650,45 @@ W11.1 ON WINDOWS: bench/test_bench.py failed "W11.1 output to a pipe or file (no
  environment, so the color checks decide for themselves. ALL OK with BENCH_COLOR=1, NO_COLOR=1 and neither. Advice
  to Casey: the profile line is not needed (colors switch on by themselves on a terminal) and forces color codes into
  piped output such as | Select-String.
+
+BIGGER MODEL ON 5.9 GB RAM (2026-11-08, Casey): Qwen2.5-Coder-7B-Instruct Q3_K_M via
+ `llama-server -hf Qwen/Qwen2.5-Coder-7B-Instruct-GGUF:Q3_K_M --port 8081 -t 4 -np 1 -c 8192 -fa on -ctk q8_0 -ctv q8_0`
+ (about 3.8 GB download). Private memory 4.18 GB, 0.4 GB free; ran steadily at 1.06-1.11 tok/s writing, ~6 tok/s
+ reading (3B Q4: ~3.6 and ~10-12). The old 3B server ran with a 32768 context (7.45 GB private including the page
+ file); -c 8192 is enough for every bench task.
+ skill_v42 -n 3 (report 20261108-0304-win-7b-q3-skill42, tool caa623d218, system_sha 1ce60c3cc5): 3/3 PASS, 0
+ false-DONE, 4.0 steps, 623 s per run. All 3 wrote self.state["metrics"] = metrics on their own (the 3B on the same
+ prompt: 4/10 and 5/10, failing exactly that). n=3 is a screen (3/3 by chance at the 3B's ~45% rate: about 1 in 11).
+ Together with Gemini's 2 omni v3 passes: the remaining skill_v42 failure is model skill, not the tool. The 7B
+ wastes some steps on NOTE-only replies. NEXT: 7B on pipeline_omni_v3 -n 10 overnight; skill_v42 to n=10.
+
+7B skill_v42 n=10 (2026-11-08, report 20261108-1627-win-7b-q3-skill42-n10, Qwen2.5-Coder-7B-Instruct Q3_K_M, tool
+ caa623d218, system_sha 1ce60c3cc5): 10/10 PASS, 0 false-DONE, 3.1 steps, 577 s per run, 0 refusals (13/13 with the
+ n=3 screen). 3B on the same prompt and tool: 4/10 (W11) and 5/10 (W8 prompt); 10 vs 4: Fisher p~0.01. The 3B's one
+ failure (self.state["metrics"] never stored) did not happen in 13 7B runs. CAVEAT: the 7B wrote almost the same
+ file every run (near-deterministic sampling at these settings): this is "the 7B reliably gets this prompt right",
+ not 10 independent solutions. CONSEQUENCE: skill_v42's gap is model skill, not the tool; W12 (state rule) only
+ helps users who stay on a 3B. The 7B pipeline_omni_v3 run (label win-7b-q3-omni3) result is not in yet.
+
+7B pipeline_omni_v3 n=10 (2026-11-08, report 20261108-1256-win-7b-q3-omni3, 7B Q3_K_M, tool caa623d218, system_sha
+ 1ce60c3cc5): 0/10 PASS, 0 false-DONE, 13.6 steps, 1264 s per run, 44 refusals; 7 step limit, 3 aborted. clean()'s
+ filter wrong in 10/10. It ran test_contract.py only 2 times in 10 runs. 38 of the 44 refusals were "this exact edit
+ was already applied": a REPEAT LOOP (run 1: cast in calc.subtotal, run_python calc.py -> "[exit 0] (no output)",
+ the same replace_def again, 7 times; it never revisited main.py or ingest.py).
+REGRESSION FOUND (mine, from W10): update 24 auto-runs the file that imports a module only when there is exactly ONE
+ importer. v3's test_contract.py also imports calc.py and ingest.py, so there are TWO and the tool only appended a
+ hint ("Run a file that uses it: main.py, test_contract.py"), which both models ignored. So on v3 every run_python of
+ calc.py / ingest.py showed only "(no output)". ALL v3 campaigns (W10, W10.1, W11, 7B) ran with this handicap; v2
+ was not affected. My W10 tests never ran the auto-run on a task with a test file.
+
+W12 (2026-11-08) FROM CLAUDE: FIX THE W10 REGRESSION. When the test gate is on and several files import the module,
+ the task's test file is left out of the choice, so the PROGRAM (main.py) is run, as on v2. One importer, or no test
+ gate: unchanged. No prompt change: system_sha 1ce60c3cc5. Version 0.1.0+win.12, tool_sha 4736ea0e54.
+ Test (on the REAL v3 files, not a hand-made example): run_python calc.py with AGENT_TEST_FILE=test_contract.py ->
+ "so the tool ran main.py for you" + the TypeError, no hint. Putting the regression back makes it FAIL. Main suite
+ 551 ALL OK; Python 3.10-3.13, cp1252, RUN_PYTHON=0 ALL OK; test_bench ALL OK; selftest ALL VERIFIERS BEHAVE;
+ --selfcheck 26 ok.
+ CONSEQUENCE: earlier v3 numbers are not a fair picture of v3; re-run v3 on W12 (3B and 7B) for the real baselines.
 
 PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
  --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the

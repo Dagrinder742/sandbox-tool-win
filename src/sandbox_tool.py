@@ -57,7 +57,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-__version__ = "0.1.0+win.11"
+__version__ = "0.1.0+win.12"
 
 
 def _default_sandbox() -> Path:
@@ -2569,6 +2569,8 @@ def _agent_loop(task: str, max_steps: int, msgs: list) -> str:
             redirect, judged, auto_top = "", result, ""
             if name == "run_python" and is_py and RUN_PYTHON and ok and result.rstrip().endswith("(no output)"):
                 tops = _entry_points(target)
+                if test_name and len(tops) > 1:   # W12: the task's test file also imports the module; run the PROGRAM
+                    tops = [t for t in tops if t != test_name] or tops   # (W10 made it 2 importers: no auto-run)
                 if len(tops) == 1:
                     top = auto_top = tops[0]
                     judged = run(f"run_python {top}")

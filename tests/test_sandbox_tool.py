@@ -1810,6 +1810,20 @@ try:
               "W10.1 with BOTH gates: right output, then a passing test run -> DONE accepted (the test's own output is "
               "not taken as the program's output)", out[-220:])
         (SB / "trun.py").unlink()
+        # W12: the REAL v3 files (test_contract.py also imports calc.py): running calc.py must still run main.py
+        _v3 = HERE.parent / "bench" / "tasks" / "pipeline_omni_v3" / "files"
+        _v3n = [f.name for f in _v3.glob("*.py")]
+        for f in _v3.glob("*.py"):
+            (SB / f.name).write_text(f.read_text())
+        os.environ["AGENT_TEST_FILE"] = "test_contract.py"
+        ans, out, seen = play(["CMD: run_python calc.py", "DONE: x", "DONE: x", "DONE: x"])
+        _m = _last(seen, 1)
+        check("so the tool ran main.py for you" in _m and "TypeError" in _m and "Run a file that uses it" not in _m,
+              "testgate", "W12 real v3 files: run_python calc.py (no output) -> the tool runs main.py, not just a hint "
+              "(W10 had made test_contract.py a second importer, which switched the auto-run off)", _m[-260:])
+        for _n in _v3n:
+            (SB / _n).unlink(missing_ok=True)
+        os.environ["AGENT_TEST_FILE"] = "tt.py"
         check(not T.READ_ONLY, "testgate", "the test file is read-only only during the run that uses it (cleared after)")
         _r = T.run("patch_file tt.py", "<<<<<<< SEARCH\nok = \n=======\nok2 = \n>>>>>>> REPLACE\n")
         check(not _r.startswith("REFUSED") or "task's test file" not in _r, "testgate",

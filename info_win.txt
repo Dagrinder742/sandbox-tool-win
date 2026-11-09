@@ -716,6 +716,31 @@ W12 RESULT (2026-11-08, Casey, --live, 7B): report 20261108-1834-win-w12-7b-omni
  time: (a) a no-op refusal that repeats the error is still the same (so the cause is elsewhere: name the files in the
  traceback); (b) on a test-gate refusal the tool runs the test file itself and shows the FAIL lines (run 5 shape).
 
+W12 RESULT 2 (2026-11-09, Casey, --live, 3B): report 20261109-0318-win-w12-3b-omni3, Qwen2.5-Coder-3B (default Q4),
+ same tool_sha 4736ea0e54 / system_sha 1ce60c3cc5 / v3 hashes as the 7B run. This is the FAIR 3B v3 baseline.
+ PASS 0/10, false-DONE 0, 14.1 steps avg, ~9 min per run (1h31m total). 7B on the same build: 2/10 (Fisher p = 0.47).
+ The W12 auto-run of main.py fired in every run (2-7 times). Gates: expected-output 10 refusals in 8 runs, test gate
+ 16 in 8 runs; no wrong DONE got through.
+ THE ONE CHECK EVERY RUN FAILED: "clean() returns price as a float" (10/10). The 3B always fixes the TypeError where it
+ shows up (a float() cast inside calc.py subtotal), not where the bad data comes from (ingest.py clean). That makes
+ main.py print the right line 1 once the filter is fixed, so the expected-output gate is satisfied and only the test
+ file can show the remaining bug.
+ NEAR MISSES: runs 1 and 5 at 13/14 (right output, only the price cast missing). Both were refused by the test gate 3
+ times and NEVER ran test_contract.py (0 test runs), so the model never saw "price of 'tea' is str '2.00'"; each
+ ended "DONE was blocked 3 times". Same shape as 7B run 5 (which did run the tests once, then mis-fixed).
+ Test runs after a test-gate refusal: 3B 9 runs of the test file for 16 refusals; 7B 8 for 13. About half the time
+ the model answers the refusal with something other than the command the refusal names.
+ OTHER FAILS: runs 3, 6, 8 aborted (3 in a row) partly on the W11 self check (the new clean() had no self; refused
+ correctly, nothing broken). Run 10 wrote "replace_def calc.py calc.subtotal" / "calc.average_order" (module name
+ as a prefix) 5 times: refused as "no def or class named calc". Runs 4, 9: repeat loops (20 no-op refusals overall).
+ NEXT (proposal, needs Casey's OK, one model-visible change):
+  W13 = idea (b): when DONE is refused only because the task's tests have not passed, the tool runs the test file
+  itself (same limits as run_python) and shows its output under the refusal, recording the result exactly as a
+  model-issued run_python (so a pass then lets the next DONE through). Evidence: 3 runs at 13/14 across both models
+  where the missing piece was a FAIL line the model never asked to see. Measure: v3 -n 10 on the 3B (and the 7B if
+  time allows), same system_sha (the SYSTEM prompt does not change).
+  Later, separately: accept "<module>.<name>" in replace_def when <module> is the file's own name (run 10).
+
 PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
  --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the
  tool; display only, the model always gets the full output, so nothing is comparable-breaking). Side effect: the

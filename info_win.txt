@@ -690,6 +690,32 @@ W12 (2026-11-08) FROM CLAUDE: FIX THE W10 REGRESSION. When the test gate is on a
  --selfcheck 26 ok.
  CONSEQUENCE: earlier v3 numbers are not a fair picture of v3; re-run v3 on W12 (3B and 7B) for the real baselines.
 
+W12 RESULT (2026-11-08, Casey, --live, 7B): report 20261108-1834-win-w12-7b-omni3, Qwen2.5-Coder-7B Q3_K_M, tool_sha
+ 4736ea0e54, system_sha 1ce60c3cc5, v3 prompt ec301b3760 / verifier c92d987576 / test_contract.py 1cd995d2d8.
+ PASS 2/10 (runs 1, 9, both 14/14, ended done), false-DONE 0, 14.0 steps avg, ~28 min per run (4h43m total).
+ Pre-W12 7B v3: 0/10 (that run had the W10 regression). Fisher p = 0.47: NOT a significant gain at n=10. What is new
+ is that a clean pass exists at all (first local pass on any pipeline_omni version).
+ THE FIX WORKED: "(the tool also ran main.py, which imports calc.py/ingest.py)" fired in every run; no run saw the
+ test file picked as the program. The v3 repeat-loop that the regression caused is gone as a cause.
+ GATES: expected-output gate refused 8 DONEs in 7 runs; test gate refused 13 in 8 runs. Run 5 (13/14: right output,
+ but clean() kept prices as str because calc.py cast them) would have been a false-DONE without the test gate: the
+ gate held it 3 times and the run ended "DONE was blocked 3 times". The test FAIL line said exactly what was wrong
+ ("price of 'tea' is str '2.00'"); the model's fix checked float(price) > 0 instead of converting, and it did not
+ re-run the tests before DONE. Near miss on model skill.
+ HOW THE 8 FAILS WENT (model skill, not tool bugs as far as the logs show):
+  - runs 3, 10 (8/14): misread the first TypeError ('float' += 'str': price str * qty int is string repetition) as
+    "qty is a str", converted qty in subtotal(), and resent that same edit until the step limit (7 no-op refusals
+    each). Never reached ingest.py. 21 "this exact edit was already applied" refusals over the campaign.
+  - run 2 (8/14): changed clean() to clean(self, rows) and edited main.py to match; main.py-unchanged FAIL.
+  - run 4 (10/14): converted price but its filter kept the empty-item row; repeated that edit.
+  - runs 6, 7, 8: blamed main.py (index/count/tuple theories); 6 also asked for a function process_data that does not
+    exist (4x "no def or class named process_data").
+ READ: the context the model sees after a refusal is short (prompts of 150-480 tokens late in a run), so it does not
+ "remember" the edit it already made; the no-op refusal stops the damage but does not redirect it.
+ NEXT: 3B v3 baseline on W12 (same prompt hash) so both sizes have a fair v3 number. Ideas, NOT approved, one at a
+ time: (a) a no-op refusal that repeats the error is still the same (so the cause is elsewhere: name the files in the
+ traceback); (b) on a test-gate refusal the tool runs the test file itself and shows the FAIL lines (run 5 shape).
+
 PREVIEW_LINES (Casey, 2026-11-05): he wants to see everything the model reads in his OWN terminal while watching
  --live runs. Done without code: $env:PREVIEW_LINES = "0" in his $PROFILE (the bench passes the environment on to the
  tool; display only, the model always gets the full output, so nothing is comparable-breaking). Side effect: the
